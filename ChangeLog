@@ -1,6 +1,12 @@
 Changelog:
 ----------
 
+99-11-02 [morten]:
+	* Added pty layer for modem device emulation
+	* Added highlevel/commandparse.c for parsing AT-commands
+	* Modified the main loop of 'amodemd' to include the pty
+	  hadeling code and AT-command parser.
+
 99-09-04 [morten]: 
 	* CVS repository now hosted on cvs.isdn4linux.de instead of
 	  oldhades.think.de.  This entery is basically a test that it

@@ -271,7 +271,7 @@
 
 	total += chunk;
 
-      } while ( !more );
+      } while ( more );
 
       return total;
    }

@@ -43,6 +43,12 @@
  *    Output:
  *      - 16-bit signed samples
  *      - length specifies number of samples
+ *
+ *    Commands supported:
+ *      None
+ *
+ *    Parameters:
+ *      Channel number to modulate (1 or 2).
  */
 
 #include <stdio.h>
@@ -55,15 +61,16 @@
 #define SAMPLERATE 7200
 #define SAMPLESPERBIT 24
 
-#define MAXBUFFER 128
+
+#define MAXBUFFER 256
 
 
 typedef struct {
 
-  signed short buffer[MAXBUFFER];
-  unsigned short w;
+  ifax_sint16 buffer[MAXBUFFER];
+  ifax_uint16 w;
+  ifax_uint8 prevbit;
   int channel;
-  unsigned char prevbit;
 
 } modulator_V21_private;
 
@@ -112,13 +119,14 @@ static unsigned short phaseinc[2][SAMPLESPERBIT] = {
 };
 
 
-int modulator_V21_handle(ifax_modp self, void *data, size_t length)
+static int modulator_V21_handle(ifax_modp self, void *data, size_t length)
 {
   modulator_V21_private *priv = self->private;
-  int remaining = length;
-  unsigned char *src = data, v;
+  size_t remaining = length;
+  ifax_uint8 v, *src = data;
   int fillbuffer, idx, delta, n, t;
-  signed int sample;
+  ifax_sint32 sp;
+  ifax_uint32 up;
 
   fillbuffer = 0;
 
@@ -150,7 +158,10 @@ int modulator_V21_handle(ifax_modp self, void *data, size_t length)
       v >>= 1;
 
       for ( t=0; t < SAMPLESPERBIT; t++ ) {
-	priv->buffer[fillbuffer++] = intsin(priv->w);
+	sp = intsin(priv->w) * 0x0A000;
+	up = sp;
+	up >>= 16;
+	priv->buffer[fillbuffer++] = up;
 	priv->w += phaseinc[priv->channel][idx];
 	idx += delta;
       }
@@ -172,13 +183,24 @@ int modulator_V21_handle(ifax_modp self, void *data, size_t length)
   return length;
 }
 
-void modulator_V21_destroy(ifax_modp self)
+static void modulator_V21_demand(ifax_modp self, size_t demand)
 {
-  free(self->private);
-  return;
+  int needed;
+
+  needed = ((unsigned int)(demand * (0x10000 / 24))) >> 16;
+
+  if ( needed < 1 )
+    needed = 1;
+
+  ifax_handle_demand(self->recvfrom,needed);
 }
 
-int modulator_V21_command(ifax_modp self, int cmd, va_list cmds)
+static void modulator_V21_destroy(ifax_modp self)
+{
+  free(self->private);
+}
+
+static int modulator_V21_command(ifax_modp self, int cmd, va_list cmds)
 {
   return 0;
 }
@@ -187,12 +209,13 @@ int modulator_V21_construct(ifax_modp self,va_list args)
 {
   modulator_V21_private *priv;
 
-  if (NULL==(priv=self->private=malloc(sizeof(modulator_V21_private)))) 
+  if ( (priv = self->private = malloc(sizeof(modulator_V21_private))) == 0 )
     return 1;
 
-  self->destroy         = modulator_V21_destroy;
-  self->handle_input    = modulator_V21_handle;
-  self->command         = modulator_V21_command;
+  self->destroy = modulator_V21_destroy;
+  self->handle_input = modulator_V21_handle;
+  self->handle_demand = modulator_V21_demand;
+  self->command = modulator_V21_command;
 
   priv->w = 0;
   priv->channel = (va_arg(args,int)) - 1;

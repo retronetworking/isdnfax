@@ -36,11 +36,14 @@
 
 #include <ifax/ifax.h>
 
+#include <ifax/modules/generic.h>
 #include <ifax/modules/debug.h>
 #include <ifax/modules/faxcontrol.h>
 #include <ifax/modules/scrambler.h>
 #include <ifax/modules/modulator-V29.h>
 #include <ifax/modules/modulator-V21.h>
+#include <ifax/modules/signalgen.h>
+#include <ifax/modules/linedriver.h>
 
 
 int     send_to_audio_construct(ifax_modp self,va_list args);
@@ -73,6 +76,8 @@ ifax_module_id  IFAX_ENCODE_SERIAL;
 ifax_module_id  IFAX_DECODE_HDLC;
 ifax_module_id  IFAX_DEBUG;
 ifax_module_id  IFAX_FAXCONTROL;
+ifax_module_id	IFAX_LINEDRIVER;
+ifax_module_id	IFAX_SIGNALGEN;
 
 void setup_all_modules(void)
 {
@@ -91,6 +96,8 @@ void setup_all_modules(void)
 	IFAX_RATECONVERT  = ifax_register_module_class("Sample-rate converter",rateconvert_construct);
 	IFAX_DEBUG        = ifax_register_module_class("Debugger",debug_construct);
 	IFAX_FAXCONTROL   = ifax_register_module_class("Fax control",faxcontrol_construct);
+	IFAX_SIGNALGEN    = ifax_register_module_class("Simple signal generator",signalgen_construct);
+	IFAX_LINEDRIVER   =  ifax_register_module_class("Linedriver",linedriver_construct);
 }
 
 void transmit_carrier(void)
@@ -121,6 +128,7 @@ void transmit_carrier(void)
 
 }
 
+#if 0
 void test_modulator_V29(void)
 {
   ifax_modp  scrambler, modulator, rateconvert, debug;
@@ -174,6 +182,7 @@ void test_modulator_V29(void)
    * and we may continue with payload data.
    */
 }    
+#endif
 
 void test_scrambler(void)
 {
@@ -217,24 +226,30 @@ void test_modulator_V21(void)
   rateconvert = ifax_create_module(IFAX_RATECONVERT,10,9,250,
 				   rate_7k2_8k_1,0x10000);
 
+	if ( rateconvert == 0 )
+		exit(42);
+
   /* Print samples of standard output for analysis */
   debug = ifax_create_module(IFAX_DEBUG,0,DEBUG_FORMAT_SIGNED16BIT,
 			     DEBUG_METHOD_STDOUT);
+
+	if ( debug == 0 )
+		exit(43);
 
   modulator->sendto = rateconvert;
   rateconvert->sendto = debug;
 
   v = 0xFFF407F;
 
-  for ( t=0; t < 200; t++ ) {
-    data = 1;
+  for ( t=0; t < 20000; t++ ) {
+    data = t;
     ifax_handle_input(modulator,&data,1);
   }
 }
 
 /* HDLC testing code
  */
-static void test_hdlc(void)
+void test_hdlc(void)
 {
 	/* module handles for all used modules.
 	 */
@@ -275,6 +290,49 @@ static void test_hdlc(void)
 	}
 }
 
+void test_linedriver(void)
+{
+  ifax_modp signalgen, scrambler, modulator, rateconvert, linedriver;
+  int remaining;
+
+  /* Generate a test-signal */
+  signalgen = ifax_create_module(IFAX_SIGNALGEN);
+  ifax_command(signalgen,CMD_SIGNALGEN_RNDBITS);
+
+  /* Set up the V.29 scrambler */
+  scrambler = ifax_create_module(IFAX_SCRAMBLER);
+  ifax_command(scrambler,CMD_SCRAMBLER_SCRAM_V29);
+
+  /* Modulate into signed shorts */
+  modulator = ifax_create_module(IFAX_MODULATORV29);
+
+  /* Rateconvert from 7200 Hz to 8000 Hz */
+  rateconvert = ifax_create_module(IFAX_RATECONVERT,10,9,250,
+				   rate_7k2_8k_1,0x10000);
+
+  /* Feed the signal to the line-driver for transmission */
+  linedriver = ifax_create_module(IFAX_LINEDRIVER);
+  ifax_command(linedriver,CMD_LINEDRIVER_AUDIO);
+
+  signalgen->sendto = scrambler;
+  scrambler->recvfrom = signalgen;
+
+  scrambler->sendto = modulator;
+  modulator->recvfrom = scrambler;
+
+  modulator->sendto = rateconvert;
+  rateconvert->recvfrom = modulator;
+
+  rateconvert->sendto = linedriver;
+  linedriver->recvfrom = rateconvert;
+
+  ifax_command(modulator,CMD_GENERIC_INITIALIZE);
+  remaining = 20260;
+  while ( remaining > 0 ) {
+    remaining -= ifax_command(linedriver,CMD_LINEDRIVER_WORK);
+  }
+}
+
 void main(int argc,char **argv)
 {
 	ifax_debugsetlevel(DEBUG_INFO);
@@ -284,5 +342,9 @@ void main(int argc,char **argv)
 	/* test_modulator_V29(); */
 	/* test_modulator_V21(); */
 //	test_scrambler();
-	test_hdlc();
+//	test_hdlc();
+
+	test_linedriver();
+
+	exit(0);
 }

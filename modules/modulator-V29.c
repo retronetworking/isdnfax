@@ -38,17 +38,41 @@
 #include <stdarg.h>
 
 #include <ifax/ifax.h>
+#include <ifax/types.h>
+#include <ifax/modules/generic.h>
 #include <ifax/modules/modulator-V29.h>
 
-/* The following defines are closely related */
+/* The following defines are closely related and must be modified with
+ * great care.  The sample-rate must be matched to the rate-convert filter
+ * and its initialization.  With SAMPLERATE=7200, an interpolation of
+ * 10 and a decimation of 9 will give a rate of 8000.  The relationship
+ * between SAMPLERATE and SAMPLESPERSYMBOL is:
+ *           SAMPLERATE = 2400 * SAMPLESPERSYMBOL
+ * where 2400 is the number of symbols per second.  The PHASEINC1700HZ
+ * is used to generate a 1700Hz carrier (0x10000 / 1700).  The only
+ * relevant alternative setup is SAMPLERATE=9600 and SAMPLESPERSYMBOL=4
+ * but this should not be needed with V.29
+ */
 #define SAMPLERATE 7200
 #define SAMPLESPERSYMBOL 3
 #define PHASEINC1700HZ 15474
 
-
+/* The Re/Im signals are low-pass filtered before they are mixed with
+ * the carrier.  The LP-filter has the following size:
+ */
 #define FILTSIZELP2400 5
 
-#define MAXBUFFERING 64
+/* Buffering capacity in samples */
+#define BUFFERSIZE 128
+
+
+/* Synchronizing symbol start positions */
+
+#define SYNCHRONIZE_START_SEG1  0
+#define SYNCHRONIZE_START_SEG2  48
+#define SYNCHRONIZE_START_SEG3  176
+#define SYNCHRONIZE_START_SEG4  560
+#define SYNCHRONIZE_START_DATA  608
 
 
 /* The following datastructure defines the state and
@@ -60,7 +84,7 @@
  * are offset by the PRIVREOFFSET and PRIVIMOFFSET
  * defines.
  *
- * It remains to bee seen if the compiler likes
+ * It remains to be seen if the compiler likes
  * this code, or if it should be changed.
  */
 
@@ -70,18 +94,16 @@
 
 typedef struct {
 
-  signed short buffer[MAXBUFFERING+2*SAMPLESPERSYMBOL];
-  signed short ReIm[FILTSIZELP2400*4];
-  int ReImInsert;
-  int bitstore_size;
-  unsigned short bitstore;
-  unsigned short w;
-  int bits_per_symbol;
-  unsigned int status;
-  unsigned int buffer_used;
-  unsigned char phase, randseq;
-  signed short M_Re, M_Im, N_Re, N_Im;
-  int sync_count;
+  unsigned int ReImInsert;
+  unsigned int  bitstore_size;
+  ifax_uint16 bitstore;
+  ifax_uint16 w;
+  unsigned int bits_per_symbol;
+  unsigned int buffer_size;
+  ifax_uint8 phase, randseq;
+  int syncseq;
+  ifax_sint16 ReIm[FILTSIZELP2400*4];
+  ifax_sint16 buffer[BUFFERSIZE+2*SAMPLESPERSYMBOL];
 
 } modulator_V29_private;
 
@@ -97,24 +119,51 @@ typedef struct {
  * connection with TABLE 1/V.29.
  */
 
-static struct { signed short Re, Im; } phaseamp[16] = 
+static struct { ifax_sint16 Re, Im; } phaseamp[16] = 
 {
-  {   4634,      0 },     /* P=000 Q=0  (0)   */
-  {  13902,      0 },     /* P=000 Q=1  (0)   */
-  {   6951,   6951 },     /* P=001 Q=0  (45)  */
-  {  11585,  11585 },     /* P=001 Q=1  (45)  */
-  {      0,   4634 },     /* P=010 Q=0  (90)  */
-  {      0,  13902 },     /* P=010 Q=1  (90)  */
-  {  -6951,   6951 },     /* P=011 Q=0  (135) */
-  { -11585,  11585 },     /* P=011 Q=1  (135) */
-  {  -4634,      0 },     /* P=100 Q=0  (180) */
-  { -13902,      0 },     /* P=100 Q=1  (180) */
-  {  -6951,  -6951 },     /* P=101 Q=0  (225) */
-  { -11585, -11585 },     /* P=101 Q=1  (225) */
-  {      0,  -4634 },     /* P=110 Q=0  (270) */
-  {      0, -13902 },     /* P=110 Q=1  (270) */
-  {   6951,  -6951 },     /* P=111 Q=0  (315) */
-  {  11585, -11585 }      /* P=111 Q=1  (315) */
+  {   9830,      0 },     /* P=000 Q=0  (0)   */
+  {  16384,      0 },     /* P=000 Q=1  (0)   */
+  {   3277,   3277 },     /* P=001 Q=0  (45)  */
+  {   9830,   9830 },     /* P=001 Q=1  (45)  */
+  {      0,   9830 },     /* P=010 Q=0  (90)  */
+  {      0,  16384 },     /* P=010 Q=1  (90)  */
+  {  -3277,   3277 },     /* P=011 Q=0  (135) */
+  {  -9830,   9830 },     /* P=011 Q=1  (135) */
+  {  -9830,      0 },     /* P=100 Q=0  (180) */
+  { -16384,      0 },     /* P=100 Q=1  (180) */
+  {  -3277,  -3277 },     /* P=101 Q=0  (225) */
+  {  -9830,  -9830 },     /* P=101 Q=1  (225) */
+  {      0,  -9830 },     /* P=110 Q=0  (270) */
+  {      0, -16384 },     /* P=110 Q=1  (270) */
+  {   3277,  -3277 },     /* P=111 Q=0  (315) */
+  {   9830,  -9830 },     /* P=111 Q=1  (315) */
+};
+
+
+/* 'signalpoint_*' holds the signal/space points used to generate
+ * synchronizing segment 2 and 3.
+ */
+
+static struct { ifax_sint16 Re, Im; } signalpoint_A = { -9830, 0 };
+
+static struct { ifax_sint16 Re, Im; } signalpoint_C = {  9830, 0 };
+
+static struct { ifax_sint16 Re, Im; } signalpoint_B[5] =
+{
+  { 0,0 },
+  { 0,0 },
+  { 0, -9830 },       /* B(4800) */
+  { 3277, -3277 },    /* B(7200) */
+  { 9830, -9830 }     /* B(9600) */
+};
+
+static struct { ifax_sint16 Re, Im; } signalpoint_D[5] =
+{
+  { 0,0 },
+  { 0,0 },
+  { 0, 9830 },        /* D(4800) */
+  { -3277, 3277 },    /* D(7200) */
+  { -9830, 9830 }     /* D(9600) */
 };
 
 
@@ -131,11 +180,11 @@ static struct { signed short Re, Im; } phaseamp[16] =
  *
  *       P2 P1 P0 0
  *
- * The last significant bit is zero in order to match the 'phaseamp'
+ * The least significant bit is zero in order to match the 'phaseamp'
  * indexing.
  */
 
-static unsigned char bits2phase[16] = {
+static ifax_uint8 bits2phase[16] = {
 
                /* Q2  Q3  Q4  Phase change */
                /* ------------------------ */
@@ -150,12 +199,23 @@ static unsigned char bits2phase[16] = {
 };
 
 
-/* This short low-pass filter is used to smoth the Re and Im
+/* This short low-pass filter is used to smooth the Re and Im
  * signals before they are mixed with the carrier.
  */
 
-static signed short lowpass2400[FILTSIZELP2400] =
+static ifax_sint16 lowpass2400[FILTSIZELP2400] =
     { -1130, 6774, 21845, 6774, -1130 };
+
+
+/* Empty the output buffer by sending it on */
+
+static void send_buffer(ifax_modp self, modulator_V29_private *priv)
+{
+  if ( priv->buffer_size > 0 ) {
+    ifax_handle_input(self->sendto,priv->buffer,priv->buffer_size);
+  }
+  priv->buffer_size = 0;
+}
 
 
 /* The 'modulate_single_symbol' function uses the absolute phase
@@ -173,13 +233,14 @@ static signed short lowpass2400[FILTSIZELP2400] =
  * output energy.
  */
 
-static void modulate_single_symbol(modulator_V29_private *priv,
-			    signed short *dst,
-			    signed short Re, signed short Im)
+static void modulate_single_symbol(ifax_modp self, modulator_V29_private *priv,
+				   ifax_sint16 Re, ifax_sint16 Im)
 {
+  ifax_sint16 *dp, *cp, *term, *dst, tmp;
+  ifax_sint32 Re_sum, Im_sum, sum;
   int s;
-  signed short *dp, *cp, *term, tmp;
-  signed int Re_sum, Im_sum, sum;
+
+  dst = &priv->buffer[priv->buffer_size];
 
   for ( s=0; s < SAMPLESPERSYMBOL; s++ ) {
 
@@ -217,16 +278,10 @@ static void modulate_single_symbol(modulator_V29_private *priv,
 
     priv->w += PHASEINC1700HZ;
   }
-}
 
-/* Empty the output buffer by sending it on */
-
-static void send_buffer(ifax_modp self, modulator_V29_private *priv)
-{
-  if ( priv->buffer_used > 0 ) {
-    ifax_handle_input(self->sendto,priv->buffer,priv->buffer_used);
-  }
-  priv->buffer_used = 0;
+  priv->buffer_size += SAMPLESPERSYMBOL;
+  if ( priv->buffer_size >= BUFFERSIZE )
+    send_buffer(self,priv);
 }
 
 /* The 'modulate_encoded_symbol' reads the required number of bits
@@ -237,234 +292,218 @@ static void send_buffer(ifax_modp self, modulator_V29_private *priv)
  * function.  The resulting samples are stored in array 'dst'.
  */
 
-static void modulate_encoded_symbol(modulator_V29_private *priv,
-				    signed short *dst)
+static void modulate_encoded_symbol(ifax_modp self,modulator_V29_private *priv)
 {
-  unsigned char bits, phase;
-  signed short Re, Im;
+  ifax_uint8 bits, phase;
+  ifax_sint16 Re, Im;
 
-  static unsigned char databits2quadbits4800[4] = { 8,2,4,14 };
+  static ifax_uint8 databits2quadbits4800[4] = { 8,2,4,14 };
+
+  bits = priv->bitstore;
+  priv->bitstore >>= priv->bits_per_symbol;
+  priv->bitstore_size -= priv->bits_per_symbol;
 
   switch ( priv->bits_per_symbol ) {
 
     case 4:
       /* 9600 bit/s */
-      bits = priv->bitstore & 0xf;
-      priv->bitstore >>= 4;
-      priv->bitstore_size -= 4;
-      phase = (priv->phase + bits2phase[bits]) &0xe;
+      phase = (priv->phase + bits2phase[bits&0xF]) &0xE;
       priv->phase = phase;
       phase = phase | (bits&1);
       Re = phaseamp[phase].Re;
       Im = phaseamp[phase].Im;
-      modulate_single_symbol(priv,dst,Re,Im);
+      modulate_single_symbol(self,priv,Re,Im);
       break;
 
     case 3:
       /* 7200 bit/s */
-      bits = (priv->bitstore & 0x7) << 1;
-      priv->bitstore >>= 3;
-      priv->bitstore_size -= 3;
-      phase = (priv->phase + bits2phase[bits]) & 0xe;
+      phase = (priv->phase + bits2phase[(bits&0x7)<<1]) & 0xE;
       priv->phase = phase;
       Re = phaseamp[phase].Re;
       Im = phaseamp[phase].Im;
-      modulate_single_symbol(priv,dst,Re,Im);
+      modulate_single_symbol(self,priv,Re,Im);
       break;
 
     case 2:
       /* 4800 bit/s */
-      bits = databits2quadbits4800[priv->bitstore & 0x3];
-      priv->bitstore >>= 2;
-      priv->bitstore_size -= 2;
-      phase = (priv->phase + bits2phase[bits]) & 0xe;
+      bits = databits2quadbits4800[bits&0x3];
+      phase = (priv->phase + bits2phase[bits]) & 0xE;
       priv->phase = phase;
       Re = phaseamp[phase].Re;
       Im = phaseamp[phase].Im;
-      modulate_single_symbol(priv,dst,Re,Im);
+      modulate_single_symbol(self,priv,Re,Im);
       break;
-  }
-}
-
-/* Generate the first three segments of the syncronization
- * sequence.  The last segment, segment 4, relies on the
- * bigger scrambler which is a module by itself.
- * Segment 4 is implemented using the ordinary encoding
- * channel (input -> encoding -> output), controlled
- * from the outside.  Segments 1-3 are generated by calling
- * the maintenance command of this encoder.  No input is
- * used until segment 4 is encoded.
- */
-
-static void modulate_synchronization(modulator_V29_private *priv)
-{
-  signed short *dst;
-
-  while ( priv->buffer_used < MAXBUFFERING ) {
-
-    dst = &priv->buffer[priv->buffer_used];
-
-    if ( priv->status & MODULATORV29_STATUS_SEGMENT1 ) {
-
-      /* Segment 1 - Silence */
-      modulate_single_symbol(priv,dst,0,0);
-      priv->buffer_used += SAMPLESPERSYMBOL;
-      priv->sync_count++;
-
-      /* Advance to segment 2 when ready */
-      if ( priv->sync_count == 48 ) {
-	priv->status = MODULATORV29_STATUS_SEGMENT2;
-	priv->sync_count = 0;
-	priv->M_Re = phaseamp[8].Re;
-	priv->M_Im = phaseamp[8].Im;
-	switch ( priv->bits_per_symbol ) {
-
-	  case 4:
-	    priv->N_Re = phaseamp[15].Re;
-	    priv->N_Im = phaseamp[15].Im;
-	    break;
-
-          case 3:
-	    priv->N_Re = phaseamp[14].Re;
-	    priv->N_Im = phaseamp[14].Im;
-	    break;
-
-	  default:
-	    priv->N_Re = phaseamp[12].Re;
-	    priv->N_Im = phaseamp[12].Im;
-	    break;
-	}
-      }
-    } else if ( priv->status & MODULATORV29_STATUS_SEGMENT2 ) {
-
-      /* Segment 2 - Alternations */
-      modulate_single_symbol(priv,dst,priv->M_Re,priv->M_Im);
-      dst += SAMPLESPERSYMBOL;
-      modulate_single_symbol(priv,dst,priv->N_Re,priv->N_Im);
-      priv->buffer_used += (2*SAMPLESPERSYMBOL);
-      priv->sync_count += 2;
-
-      /* Advance to segment 3 when ready */
-      if ( priv->sync_count == 128 ) {
-	priv->status = MODULATORV29_STATUS_SEGMENT3;
-	priv->sync_count = 0;
-	priv->randseq = 0x2A;
-	priv->M_Re = phaseamp[0].Re;
-	priv->M_Im = phaseamp[0].Im;
-
-	switch ( priv->bits_per_symbol ) {
-
-	  case 4:
-	    priv->N_Re = phaseamp[7].Re;
-	    priv->N_Im = phaseamp[7].Im;
-	    break;
-
-          case 3:
-	    priv->N_Re = phaseamp[6].Re;
-	    priv->N_Im = phaseamp[6].Im;
-	    break;
-
-	  default:
-	    priv->N_Re = phaseamp[4].Re;
-	    priv->N_Im = phaseamp[4].Im;
-	    break;
-	}
-      }
-    } else if ( priv->status & MODULATORV29_STATUS_SEGMENT3 ) {
-
-      /* Segment 3 - Equalizer conditioning pattern */
-      if ( priv->randseq & 1 ) {
-	modulate_single_symbol(priv,dst,priv->N_Re,priv->N_Im);
-      } else {
-	modulate_single_symbol(priv,dst,priv->M_Re,priv->M_Im);
-      }
-      priv->buffer_used += SAMPLESPERSYMBOL;
-      priv->sync_count++;
-      priv->randseq = (((priv->randseq<<6) ^ (priv->randseq<<5)) & 0x40)
-	                   | (priv->randseq>>1);
-
-      /* Advance to segment 4 when ready */
-      if ( priv->sync_count == 384 ) {
-	priv->status = MODULATORV29_STATUS_SEGMENT4;
-	priv->sync_count = 0;
-	return;
-      }
-    } else if ( priv->status & MODULATORV29_STATUS_SEGMENT4 ) {
-
-      /* Segment 4 - Scrambled all binary ones */
-      return;
-    }
   }
 }
 
 
 int modulator_V29_handle(ifax_modp self, void *data, size_t length)
 {
-  modulator_V29_private *priv=(modulator_V29_private *)self->private;
-  int remaining=length;
-  unsigned char *dp = data;
-  int symbols;
-
-  symbols = 0;
+  modulator_V29_private *priv = self->private;
+  size_t remaining = length;
+  ifax_uint8 *dp = data;
+  ifax_uint16 new_bits;
+  int new_bits_size;
 
   while ( remaining > 0 || priv->bitstore_size >= priv->bits_per_symbol ) {
 
+    /* Refill the bitstore if needed */
+
     if ( priv->bitstore_size < priv->bits_per_symbol ) {
-      if ( priv->bitstore_size == 0 ) {
-	priv->bitstore = *dp++;
+
+      if ( remaining >= 8 ) {
+	/* Can get a full byte */
+	new_bits = (*dp++) & 0x00ff;
+	new_bits_size = 8;
+	remaining -= 8;
       } else {
-	priv->bitstore |= (*dp++) << priv->bitstore_size;
+	/* Only partially full byte left */
+	new_bits = (*dp++) & ((1<<remaining)-1);
+	new_bits_size = remaining;
+	remaining = 0;
       }
-      priv->bitstore_size += 8;
-      remaining--;
+
+      if ( priv->bitstore_size == 0 ) {
+	priv->bitstore = new_bits;
+	priv->bitstore_size = new_bits_size;
+      } else {
+	priv->bitstore |= new_bits << priv->bitstore_size;
+	priv->bitstore_size += new_bits_size;
+      }
     }
 
-    modulate_encoded_symbol(priv,&priv->buffer[priv->buffer_used]);
-    priv->buffer_used += SAMPLESPERSYMBOL;
-    symbols++;
+    /* Modulate a symbol if we have enough bits */
 
-    if ( priv->buffer_used >= MAXBUFFERING )
-      send_buffer(self,priv);
+    if ( priv->bitstore_size >= priv->bits_per_symbol )
+      modulate_encoded_symbol(self,priv);
   }
 
   send_buffer(self,priv);
 
-  if ( priv->status & MODULATORV29_STATUS_SEGMENT4 ) {
-    priv->sync_count += symbols;
-    if ( priv->sync_count >= 48 ) {
-      priv->status = MODULATORV29_STATUS_DATA;
-    }
-  }
-
   return length;
 }
 
-void modulator_V29_destroy(ifax_modp self)
-{
-  free(self->private);
-  return;
-}
-
-int modulator_V29_command(ifax_modp self, int cmd, va_list cmds)
+static void modulator_V29_demand(ifax_modp self, size_t demand)
 {
   modulator_V29_private *priv = self->private;
-  unsigned int *statusp;
+  int symbols_needed, do_symbols, bits_needed;
+  ifax_sint16 Re, Im;
+
+  symbols_needed = (((0x10000/SAMPLESPERSYMBOL) * demand) >> 16) + 1;
+
+  if ( priv->syncseq < SYNCHRONIZE_START_SEG4 ) {
+
+    /* We are synchronizing; segments 1-3 generates data directly, segment 4
+     * depends on the output of the previous scrambler module.
+     */
+
+    while ( symbols_needed > 0 ) {
+
+      if ( priv->syncseq < SYNCHRONIZE_START_SEG2 ) {
+
+	/* Segment 1 - Silence */
+
+	modulate_single_symbol(self,priv,0,0);
+	priv->syncseq++;
+	symbols_needed--;
+
+      } else if ( priv->syncseq < SYNCHRONIZE_START_SEG3 ) {
+
+	/* Segment 2 - Alternations */
+
+	if ( priv->syncseq & 1 ) {
+	  Re = signalpoint_B[priv->bits_per_symbol].Re;
+	  Im = signalpoint_B[priv->bits_per_symbol].Im;	
+	} else {
+	  Re = signalpoint_A.Re;
+	  Im = signalpoint_A.Im;
+	}
+
+	modulate_single_symbol(self,priv,Re,Im);
+	priv->syncseq++;
+	symbols_needed--;
+
+      } else if ( priv->syncseq < SYNCHRONIZE_START_SEG4 ) {
+
+	/* Segment 3 - Equalizer conditioning pattern */
+
+	if ( priv->randseq & 1 ) {
+	  Re = signalpoint_D[priv->bits_per_symbol].Re;
+	  Im = signalpoint_D[priv->bits_per_symbol].Im;
+	} else {
+	  Re = signalpoint_C.Re;
+	  Im = signalpoint_C.Im;
+	}
+
+	modulate_single_symbol(self,priv,Re,Im);
+	priv->syncseq++;
+	symbols_needed--;
+
+	priv->randseq = (((priv->randseq<<6) ^ (priv->randseq<<5)) & 0x40)
+	                   | (priv->randseq>>1);
+
+      } else if ( priv->syncseq == SYNCHRONIZE_START_SEG4 ) {
+
+	/* Segment 4 is about to start, initialize the scrambler that
+	 * is (hopefully!) the previous module.
+	 */
+
+	ifax_command(self->recvfrom,CMD_GENERIC_INITIALIZE);
+	ifax_command(self->recvfrom,CMD_GENERIC_SCRAMBLEONES);
+	priv->bitstore_size = 0;
+	priv->bitstore = 0;
+	break;
+      }
+    }
+  }
+
+  if ( symbols_needed && priv->syncseq < SYNCHRONIZE_START_DATA ) {
+    
+    /* Segment 4 is on - demand data (ones) from the scrambler one step
+     * up the signal chain.
+     */
+
+    do_symbols = SYNCHRONIZE_START_DATA - priv->syncseq;
+    if ( do_symbols > symbols_needed )
+      do_symbols = symbols_needed;
+
+    bits_needed = do_symbols * priv->bits_per_symbol - priv->bitstore_size;
+
+    ifax_handle_demand(self->recvfrom,bits_needed);
+    symbols_needed -= do_symbols;
+    priv->syncseq += do_symbols;
+    if ( priv->syncseq >= SYNCHRONIZE_START_DATA )
+      ifax_command(self->recvfrom,CMD_GENERIC_STARTPAYLOAD);
+  }
+
+  if ( symbols_needed && priv->syncseq >= SYNCHRONIZE_START_DATA ) {
+    bits_needed = symbols_needed * priv->bits_per_symbol - priv->bitstore_size;
+    ifax_handle_demand(self->recvfrom,bits_needed);
+  }
+
+  send_buffer(self,priv);
+}
+
+
+
+static void modulator_V29_destroy(ifax_modp self)
+{
+  free(self->private);
+}
+
+static int modulator_V29_command(ifax_modp self, int cmd, va_list cmds)
+{
+  modulator_V29_private *priv = self->private;
 
   switch ( cmd ) {
 
-    case CMD_MODULATORV29_STARTSYNC:
-      priv->status = MODULATORV29_STATUS_SEGMENT1;
-      priv->sync_count = 0;
+    case CMD_GENERIC_INITIALIZE:
+      priv->syncseq = SYNCHRONIZE_START_SEG1;
+      priv->randseq = 0x2A;
       break;
 
-    case CMD_MODULATORV29_MAINTAIN:
-      if ( priv->status & MODULATORV29_STATUS_SEGMENT1234 ) {
-	modulate_synchronization(priv);
-	send_buffer(self,priv);
-      }
-      statusp = va_arg(cmds,unsigned int *);
-      *statusp = priv->status;
-      break;
+    default:
+      return 1;
   }
 
   return 0;
@@ -475,20 +514,21 @@ int modulator_V29_construct(ifax_modp self,va_list args)
   modulator_V29_private *priv;
   int t;
 
-  if (NULL==(priv=self->private=malloc(sizeof(modulator_V29_private)))) 
+  if ( (priv = self->private = malloc(sizeof(modulator_V29_private))) == 0 )
     return 1;
 
-  self->destroy         = modulator_V29_destroy;
-  self->handle_input    = modulator_V29_handle;
-  self->command         = modulator_V29_command;
+  self->destroy = modulator_V29_destroy;
+  self->handle_input = modulator_V29_handle;
+  self->handle_demand = modulator_V29_demand;
+  self->command = modulator_V29_command;
 
   priv->w = 0;
   priv->bitstore_size = 0;
   priv->bitstore = 0;
-  priv->bits_per_symbol = 4;    /* Default 9600, should be option */
+  priv->bits_per_symbol = 4;
   priv->phase = 0;
   priv->randseq = 0;
-  priv->buffer_used = 0;
+  priv->buffer_size = 0;
 
   priv->ReImInsert = FILTSIZELP2400;
   for ( t=0; t < (4*FILTSIZELP2400); t++ )

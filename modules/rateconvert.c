@@ -28,7 +28,15 @@
 ******************************************************************************
 */
 
-/*
+/* The module interface is:
+ *
+ * Input and Output:
+ *   - 16-bit signed samples
+ *   - length specifies number of samples
+ *
+ * Commands supported:
+ *   None
+ *
  * Parameters are:
  *      int       upsample factor
  *      int       downsample factor
@@ -58,39 +66,44 @@
 #include <stdarg.h>
 #include <stdlib.h>
 #include <ifax/ifax.h>
+#include <ifax/types.h>
+#include <ifax/modules/rateconvert.h>
 
-#define MAXBUFFER 128
+
+#define MAXBUFFER 256
 
 typedef struct {
 
   int filtersize;
-  signed short *coefs;
-  signed short *data;
-  signed short **subfilter;
+  ifax_sint16 *coefs;
+  ifax_sint16 *data;
+  ifax_sint16 **subfilter;
   int subfiltsize;
   int storenext;
   int upfactor, downfactor;
   unsigned int next_seq;
   unsigned int seq_size;
-  signed int scale;
+  ifax_sint32 scale;
+  ifax_uint32 rate_factor;      /*  0x10000 * downfactor / upfactor */
+  int dry_period;
 
   struct {
-    signed short *startcoef;
+    ifax_sint16 *startcoef;
     int count;
   } *seq;
 
-  signed short buffer[MAXBUFFER];
+  ifax_sint16 buffer[MAXBUFFER];
 
 } rateconvert_private;
 
 
 
-int rateconvert_handle(ifax_modp self, void *data, size_t length)
+static int rateconvert_handle(ifax_modp self, void *data, size_t length)
 {
-  rateconvert_private *priv=(rateconvert_private *)self->private;
-  signed short *idp = data, *dp, *coef, temp;
+  rateconvert_private *priv = self->private;
+  ifax_sint16 *idp = data, *dp, *coef, temp;
   int bp, t, p, k, count;
-  signed int sum;
+  ifax_sint32 sum;
 
   bp = 0;
   for ( t=0; t < length; t++ ) {
@@ -139,7 +152,7 @@ int rateconvert_handle(ifax_modp self, void *data, size_t length)
   return length;
 }
 
-void rateconvert_destroy(ifax_modp self)
+static void rateconvert_destroy(ifax_modp self)
 {
   rateconvert_private *priv=(rateconvert_private *)self->private;
 
@@ -158,7 +171,21 @@ void rateconvert_destroy(ifax_modp self)
   free(self->private);
 }
 
-int rateconvert_command(ifax_modp self, int cmd, va_list cmds)
+static void rateconvert_demand(ifax_modp self, size_t demand)
+{
+  rateconvert_private *priv = self->private;
+  unsigned int needed;
+
+  needed = demand * priv->rate_factor;
+  needed >>= 16;
+
+  if ( needed < priv->dry_period )
+    needed = priv->dry_period;
+
+  ifax_handle_demand(self->recvfrom,needed);
+}
+
+static int rateconvert_command(ifax_modp self, int cmd, va_list cmds)
 {
   return 0;
 }
@@ -168,13 +195,15 @@ int rateconvert_construct(ifax_modp self, va_list args )
 {
   rateconvert_private *priv;
   int t, k, n, decimate;
-  signed short *filtercoef, *dp, *sp;
+  ifax_sint16 *filtercoef, *dp, *sp;
+  int dry;
 
   if ( (priv = self->private = malloc(sizeof(rateconvert_private))) == 0 )
     return 1;
 
   self->destroy = rateconvert_destroy;
   self->handle_input = rateconvert_handle;
+  self->handle_demand = rateconvert_demand;
   self->command = rateconvert_command;
 
   priv->upfactor = va_arg(args,int);
@@ -235,12 +264,14 @@ int rateconvert_construct(ifax_modp self, va_list args )
    * with.
    */
 
-  priv->next_seq = 0; /* priv->upfactor * priv->downfactor; */
+  priv->dry_period = 0;
+  priv->next_seq = 0;
   priv->seq_size = priv->upfactor * priv->downfactor;
   if ( (priv->seq = malloc(sizeof(*priv->seq)*priv->seq_size)) == 0 )
     return 1;
 
   decimate = 0;
+  dry = 0;
   for ( t=0; t < priv->seq_size; t++ ) {
       priv->seq[t].count = 0;
       if ( decimate < priv->upfactor ) {
@@ -253,7 +284,16 @@ int rateconvert_construct(ifax_modp self, va_list args )
 	decimate += priv->downfactor;
       }
       decimate -= priv->upfactor;
+
+      dry++;
+      if ( priv->seq[t].count != 0 ) {
+	if ( dry > priv->dry_period )
+	  priv->dry_period = dry;
+	dry = 0;
+      }
   }
+
+  priv->rate_factor = (0x10000 * priv->downfactor) / priv->upfactor;
 
   return 0;
 }

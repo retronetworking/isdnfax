@@ -109,6 +109,10 @@
 		   mask <<= 1;
 		 }
 		 break;
+	       case DEBUG_FORMAT_CONFIDENCE:
+		 fprintf(file,"%d\n",u8[0]?u8[1]:-u8[1]);
+		 u8 += 2;
+		 break;
                default:
                   fprintf(stderr,"Bad DEBUG_FORMAT_*\n");
                   exit(1);

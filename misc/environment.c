@@ -26,6 +26,10 @@
 ******************************************************************************
 */
 
+/* This file deals with setting up the environment of the daemon so that
+ * it can run real-time, as a daemon, write pid-file, check stack usage etc.
+ */
+
 #include <stdio.h>
 #include <sys/mman.h>
 #include <sched.h>
@@ -37,8 +41,8 @@
 #include <ifax/misc/environment.h>
 #include <ifax/misc/readconfig.h>
 
-char *bottom_unused_stack = 0;  /* This part of the stack shouldn't be used */
-char *top_used_stack = 0;       /* Top of stack, used a lot */
+static char *bottom_unused_stack = 0;  /* Unused bottom part of stack */
+static char *top_used_stack = 0;       /* Top of stack, used a lot */
 
 /* The following function puts this daemon into a mode of operation
  * where it will get the CPU-power needed to carry out its task.
@@ -59,14 +63,14 @@ void initialize_realtime(void)
    * its data into RAM, and tell the OS to avoid paging.  The assumed
    * stack-usage is 1MB, which is probably way to much, but RAM is cheap.
    * We have to initialize the stack-segment to make sure all pages
-   * making up the stack is mapped.
+   * making up the stack is mapped bafore we lock them all.
    */
 
   if ( do_lock_memory ) {
     memset(stack_initialization,TOTAL_STACK_USAGE,0);
 
     if ( mlockall(MCL_CURRENT|MCL_FUTURE) != 0 ) {
-      fprintf(stderr,"Can't lock memory\n");
+      fprintf(stderr,"%s: Can't lock memory\n",progname);
       exit(1);
     }
 
@@ -88,7 +92,7 @@ void initialize_realtime(void)
   if ( realtime_priority > 0 ) {
     schedparams.sched_priority = realtime_priority;
     if ( sched_setscheduler((pid_t)0,SCHED_FIFO,&schedparams) < 0 ) {
-      fprintf(stderr,"Couldn't enable real-time scheduling\n");
+      fprintf(stderr,"%s: Couldn't enable real-time scheduling\n",progname);
       exit(1);
     }
   }
@@ -102,6 +106,7 @@ void initialize_realtime(void)
 void start_daemon(void)
 {
   pid_t child_pid;
+  FILE *pf;
 
   if ( (child_pid=fork()) < 0 ) {
     fprintf(stderr,"%s: Unable to fork a daemon\n",progname);
@@ -110,6 +115,16 @@ void start_daemon(void)
 
   if ( child_pid )
     exit(0);
+
+  if ( strlen(pid_file) > 0 && strcmp(pid_file,"0") ) {
+    /* Write a pid-file */
+    if ( (pf=fopen(pid_file,"w")) == 0 ) {
+      fprintf(stderr,"%s: Unable to write pidfile %s\n",progname,pid_file);
+      exit(1);
+    }
+    fprintf(pf,"%d\n",getpid());
+    fclose(pf);
+  }
 
   setsid();
 }

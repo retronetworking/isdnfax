@@ -31,3 +31,4 @@
 
 extern struct G3fax *initialize_G3fax(ifax_modp);
 extern void fax_prepare_incomming(struct G3fax *);
+extern void fax_prepare_outgoing(struct G3fax *);

@@ -27,28 +27,14 @@
 ******************************************************************************
 */
 
-// handling the FSM
+/* handling the FSM */
 
 #include <ifax/G3/fax.h>
+#include <ifax/misc/statemachine.h>
 
-void fax_run_internals(struct G3fax *fax)
+struct G3fax *fax;
+
+void fax_run_internals(void)
 {
-  void (*prev)(struct G3fax *);
-
-  do {
-    prev = fax->fsm;
-    (fax->fsm)(fax);
-  } while ( prev != fax->fsm );
-}
-
-void call_subroutine(struct G3fax *fax) {
-
-  printf ("I'm empty: call_subroutine\n");
-
-}
-
-void return_from_subroutine(struct G3fax *fax) {
-
-  printf ("I'm empty: return_from_subroutine\n");
-
+  run_statemachines();
 }

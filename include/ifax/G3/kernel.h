@@ -29,6 +29,6 @@
 
 #include <ifax/G3/fax.h>
 
-extern void fax_run_internals(struct G3fax *fax);
+extern void fax_run_internals();
 extern void call_subroutine(struct G3fax *fax);
 extern void return_from_subroutine(struct G3fax *fax);

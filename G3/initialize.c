@@ -36,18 +36,9 @@
 /* Import rate-converter filter */
 extern ifax_sint16 rate_7k2_8k_1[250];
 
-struct G3fax *initialize_G3fax(ifax_modp linedriver)
+void initialize_G3fax(ifax_modp linedriver)
 {
-  struct G3fax *fax;
-
   fax = ifax_malloc(sizeof(*fax),"G3-fax handle");
-
-  /* The linedriver is responsible for reading samples from the phone-line
-   * and pushing them into the demodulator(s), and ask the modulators for
-   * samples to be transmitted.
-   */
-  /* NOTE: Global linedriver used now.
-     fax->linedriver = ifax_create_module(IFAX_LINEDRIVER); */
 
   /* The modulators output with a sampeling rate of 7200 Hz.  This
    * rateconverter is used to upsample to 8000 Hz (phone-line rate).
@@ -79,7 +70,7 @@ struct G3fax *initialize_G3fax(ifax_modp linedriver)
 
   /* The initial simple establishment phase (no V.8 involved) uses just
    * a few sinus signals.  The sinus-signal generators are initialized
-   * onse and for all and brought online when needed for the CNG and CED
+   * once and for all and brought online when needed for the CNG and CED
    * signals.  The silence generator is used during periods of silence.
    */
 
@@ -98,10 +89,20 @@ struct G3fax *initialize_G3fax(ifax_modp linedriver)
 
   fax->encoderHDLC = ifax_create_module(IFAX_ENCODER_HDLC);
 
-
   ifax_connect(fax->rateconv7k2to8k0,linedriver);
 
-  return fax;
+
+  /* Test-code: run a loopback to use Andreas' fsk_demod and HDLC
+   * decoder to verify correctness.
+   */
+
+  /*  fax->fskd = ifax_create_module (IFAX_FSKDEMOD, 1650, 1850, 300);
+  fax->dehdlc = ifax_create_module (IFAX_DECODE_HDLC, 300);
+  fax->faxctrl = ifax_create_module (IFAX_FAXCONTROL);
+
+  ifax_connect(linedriver,fax->fskd);
+  ifax_connect(fax->fskd,fax->dehdlc);
+  ifax_connect(fax->dehdlc,fax->faxctrl); */
 }
 
 
@@ -112,5 +113,10 @@ struct G3fax *initialize_G3fax(ifax_modp linedriver)
 
 void fax_prepare_incomming(struct G3fax *fax)
 {
-  initialize_fsm_incomming(fax);
+  fax_initialize_fsm_incomming();
+}
+
+void fax_prepare_outgoing(struct G3fax *fax)
+{
+  /* fax_initialize_fsm_outgoing(fax); */
 }

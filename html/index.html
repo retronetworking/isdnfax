@@ -1,0 +1,85 @@
+<html>
+
+<head>
+   <meta http-equiv="Content-Type" content="text/html; charset=iso-8859-1">
+   <meta name="HISTORY" content="19990602: First web-announce of i4lfax Software Fax OSS project">
+   <meta name="KeyWords" content="V.21, V.29, V.17, fax, modem, DSP, modulation, demodulation">
+   <title>i4lfax - Software fax solution</title>
+</head>
+
+<body text="#FFFFFF" bgcolor="#000000" link="#00EE00" vlink="#00EE00" alink="#00EE00">
+
+<table border=0 cellspacing=0 cellpadding=0>
+ <tr>
+  <td colspan=3><a href="banner.html"><img src="i4lfaxbanner.gif" height=110 width=760 border=0></a></td>
+
+ <tr>
+  <td valign=top>
+   <table width=200 cellpadding=3>
+    <tr><td valign=top>&nbsp;</td></tr>
+    <tr><td valign=top><h2><a href="motivation.html">Motivation<a/></h2></td></tr>
+    <tr><td valign=top><h2><a href="license.html">License</a></h2></td></tr>
+    <tr><td valign=top><h2><a href="platforms.html">Platform</a></h2></td></tr>
+    <tr><td valign=top><h2><a href="yes.html">Will it work?</a></h2></td></tr>
+    <tr><td valign=top><h2><a href="how.html">How does it work?</a></h2></td></tr>
+    <tr><td valign=top><h2><a href="team.html">Project members</a></h2></td></tr>
+    <tr><td valign=top><h2><a href="help.html">Want to help?</a></h2></td></tr>
+    <tr><td valign=top><h2><a href="availability.html">Availability</a></h2></td></tr>
+    <tr><td valign=top><h2><a href="resources.html">Resources</a></h2></td></tr>
+    <tr><td valign=top>&nbsp;</td></tr>
+    <tr><td valign=top>Last updated Aug. 23 1999 by <a href="mailto:Morten.Rolland@asker.mail.telia.com">Morten&nbsp;Rolland</a></td></tr>
+   </table>
+  </td>
+  <td valign=top>
+   <table width=560>
+    <td>
+
+     <h1>Introduction to i4lfax</h1>
+
+     <p>The 'i4lfax' (or 'isdnfax') project aims to provide the neccesary open source software
+     to use a computer as a fax-machine without the need for a dedicated fax-modem. This project
+     thus aims to provide a <i>Software only</i> fax solution.</p>
+
+     <p>Some basic method of communication with remote fax-machines must be available.
+     The 'ISDN4Linux' subsystem can provide this connection over ISDN-lines on a Linux
+     system. A 'Win-modem' may provide the voice-connection needed on a standard
+     phone-line.</p>
+
+     <p>The project development started out on the Linux platform, and no attempt to
+     port has yet been made.  There should be few problems porting to other modern
+     platforms, but at this early stage of development this is not a priority task.</p>
+
+     <p>The digital signal processing algorithms needed to implement a fax solution
+     is expected not to burden a Pentium grade CPU unacceptably.</p>
+
+     <hr>
+
+     <h1>Quick project status</h1>
+
+     <p>Some of the successes so far:
+
+     <ul>
+      <li>Simulated 9600 bit/s V.29 modulation/demodulation on a perfect line</li>
+      <li>Successfully decoded initial control-messages from a fax-machine</li>
+      <li>300 bit/s communication with real modem/fax over ISDN  using V.21 standard</li>
+      <li>Made use of the real-time scheduler in a standard Linux kernel</li>
+      <li>Established a framework for chaining DSP-modules</li>
+      <li>ISDN4Linux has proved to work well as a voice-carrier.</li>
+     </ul>
+
+     As can be seen, development effort is directed towards the low-level modulation,
+     demodulation and link-level algorithms needed to get the basic communications
+     up and running. The problem areas that needs investigation before this project gets off
+     the ground are many and large, so please don't hold your breath waiting for a working release.</p>
+
+     <p>Part of the problem is all the things about digital signal processing we have
+     to learn along the way...</p>
+
+    </td>
+   </table>
+  </td>
+ </tr>
+</table>
+
+</body>
+</html>

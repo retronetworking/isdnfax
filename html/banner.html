@@ -1,0 +1,64 @@
+<html>
+
+<head>
+   <meta http-equiv="Content-Type" content="text/html; charset=iso-8859-1">
+   <meta name="HISTORY" content="19990602: First web-announce of i4lfax Software Fax OSS project">
+   <meta name="KeyWords" content="V.21, V.29, V.17, fax, modem, DSP, modulation, demodulation">
+   <title>i4lfax - Software fax solution</title>
+</head>
+
+<body text="#FFFFFF" bgcolor="#000000" link="#00EE00" vlink="#00EE00" alink="#00EE00">
+
+<table border=0 cellspacing=0 cellpadding=0>
+ <tr>
+  <td colspan=3><a href="banner.html"><img src="i4lfaxbanner.gif" height=110 width=760 border=0></a></td>
+
+ <tr>
+  <td valign=top>
+   <table width=200 cellpadding=3>
+    <tr><td valign=top>&nbsp;</td></tr>
+    <tr><td valign=top><h2><a href="index.html">Back to<br>main page</a></h2></td></tr>
+    <tr><td valign=top>&nbsp;</td></tr>
+    <tr><td valign=top>Last updated Jun. 2 1999 by <a href="mailto:Morten.Rolland@asker.mail.telia.com">Morten&nbsp;Rolland</a></td></tr>
+   </table>
+  </td>
+  <td valign=top>
+   <table width=560>
+    <td>
+
+     <h1>The banner graphics</h1>
+
+     <p>The banner above was designed using 'gimp' on a Linux workstation.
+     During the hours spent on designing the graphics, I learned a lot
+     about 'gimp', which basically was my motivation for spending so much
+     time designing it.  It is probably very naive, but it was fun making it.</p>
+
+     <p>Appart from the obvious fax-page on the left, there is a 'signal-space
+     diagram' that shows the complex signal-points plotted in a Re/Im coordinate
+     system.  Basically, a point (marked with a cross) designates a given
+     four-bit binary sequence. The distance of a point from the center indicates
+     what amplitude the modulation carrier must have to transmit the given four-bit
+     binary sequence, while the angle indicates how much the carrier has to be
+     phase-shifted.  With 16 signal-points, there is one point for each possible
+     four-bit sequence, which makes it possible to transfer 4 bits in one
+     "symbol-period" or "baud".  In V.29 there are 2400 symbol periods per second,
+     which gives a bit-rate of 4&nbsp;x&nbsp;2400 => 9600&nbsp;bit/s.</p>
+
+     <p>The curve is what a given set of signal-points may translate
+     into in terms of digital samples, which gradually gets smoothed as they
+     turn analog somewhere along the line before they finaly reach the destination
+     fax-machine.</p>
+
+     <p>The background is basically random sequences of 0/1, but a repeating
+     pattern of '01111110' can be seen, which is the "flag-sequence" used
+     in the synchronous HDLC link-level protocol used among other places, in fax
+     transfers.</p>
+
+    </td>
+   </table>
+  </td>
+ </tr>
+</table>
+
+</body>
+</html>

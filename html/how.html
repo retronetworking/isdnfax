@@ -1,0 +1,86 @@
+<html>
+
+<head>
+   <meta http-equiv="Content-Type" content="text/html; charset=iso-8859-1">
+   <meta name="HISTORY" content="19990602: First web-announce of i4lfax Software Fax OSS project">
+   <meta name="KeyWords" content="V.21, V.29, V.17, fax, modem, DSP, modulation, demodulation">
+   <title>i4lfax - Software fax solution</title>
+</head>
+
+<body text="#FFFFFF" bgcolor="#000000" link="#00EE00" vlink="#00EE00" alink="#00EE00">
+
+<table border=0 cellspacing=0 cellpadding=0>
+ <tr>
+  <td colspan=3><a href="banner.html"><img src="i4lfaxbanner.gif" height=110 width=760 border=0></a></td>
+
+ <tr>
+  <td valign=top>
+   <table width=200 cellpadding=3>
+    <tr><td valign=top>&nbsp;</td></tr>
+    <tr><td valign=top><h2><a href="index.html">Back to<br>main page</a></h2></td></tr>
+    <tr><td valign=top>&nbsp;</td></tr>
+    <tr><td valign=top>Last updated Jun. 2 1999 by <a href="mailto:Morten.Rolland@asker.mail.telia.com">Morten&nbsp;Rolland</a></td></tr>
+   </table>
+  </td>
+  <td valign=top>
+   <table width=560>
+    <td>
+
+     <h1>How does it work?</h1>
+
+     <p>Audio can be digitally sampled like on a music-CD or sound-card.
+     A computer can run software algorithms on such digital samples
+     that mimic the inner workings of a standard modem that may itself be designed
+     purely from amplifiers, filters, signal-generators and what-not.</p>
+
+     <p>Actually, a software algorithm can also do stuff that is
+     practically impossible with standard electronic circuits, so all modern
+     modems uses one or several software algorithms to perform signal analysis
+     and generation. New 56k modems would be impossible where it not for
+     such software algorithms. A special breed of processors called
+     <i>"Digital Signal Processors"</i> (DSPs) are mostly used for this kind of
+     task, as they are designed to cope with the enormous amounts of
+     multiplications, additions and fast/strange indexing that are
+     usually needed by the software algorithms.</p>
+
+     <P>In modems that uses software algorithms, the circuits needed to connect
+     to the phone-line resembles that of a sound-card; they can turn the
+     incomming signal into digital samples, and they can convert the outgoing
+     digital samples into an electrical signal suitable for the phone-line.
+     Most of what happens inside a modern modem is thus the result of a
+     computer program. There is basically no reason why this computer program
+     can't be run on the main processor of the computer instead of inside the
+     modem, except from:</p>
+
+     <ol>
+
+      <li>The algorithms has to be developed/known, or licensed from a company
+      with experience from modem design</LI>
+
+      <li>Running the software algorithms of a modem may be too demanding for
+      the main processor of the computer.</li>
+
+     </ol>
+
+     <p>The second point is no longer very relevant, as computers keep
+     getting faster all the time, with the occational big leap like
+     the SIMD extensions of the Pentium. The first point however, is the reason
+     why there is no such software for Linux.  We hope to change this.</p>
+
+     <p>By using the (soft-) realtime scheduler in the standard Linux kernel
+     and disabeling paging for the modem software, the problems with running
+     a timing-critical task on a multiuser system can be solved.</p>
+
+     <p>By using an ISDN-system, the audio-samples can be sent directly
+     towards a remote fax-machine without any other equipment than the ISDN-card.
+     There will probably be support for Win-modems some time in the future if
+     specifications can be obtained.</p>
+
+    </td>
+   </table>
+  </td>
+ </tr>
+</table>
+
+</body>
+</html>

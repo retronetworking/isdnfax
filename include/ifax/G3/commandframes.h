@@ -2,10 +2,10 @@
 ******************************************************************************
 
    Fax program for ISDN.
-   Common defines for the G3-fax subsystem
+   Assemble frames used to command/respond remote party.
 
    Copyright (C) 1999 Morten Rolland [Morten.Rolland@asker.mail.telia.com]
-  
+
    Permission is hereby granted, free of charge, to any person obtaining a
    copy of this software and associated documentation files (the "Software"),
    to deal in the Software without restriction, including without limitation
@@ -26,29 +26,6 @@
 ******************************************************************************
 */
 
-#include <ifax/module.h>
-#include <ifax/types.h>
-
-#ifndef _G3_FAX_H
-#define _G3_FAX_H
-
-struct G3fax {
-  ifax_modp linedriver;
-  ifax_modp rateconv7k2to8k0;
-  ifax_modp sinusCED;
-  ifax_modp sinusCNG;
-  ifax_modp silence;
-  ifax_modp scrambler;
-  ifax_modp modulatorV21;
-  ifax_modp modulatorV29;
-  ifax_modp encoderHDLC;
-
-  ifax_modp fskd, dehdlc, faxctrl;
-
-  ifax_uint8 DIS[32], CSI[32], NSF[32];
-  int DISsize, CSIsize, NSFsize;
-};
-
-extern struct G3fax *fax;
-
-#endif
+extern void fax_setup_outgoing_DIS(void);
+extern void fax_setup_outgoing_CSI(void);
+extern void fax_setup_outgoing_NSF(void);

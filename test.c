@@ -1,5 +1,5 @@
 /* $Id$
-   ******************************************************************************
+******************************************************************************
 
    Fax program for ISDN.
 
@@ -23,11 +23,13 @@
    IN AN ACTION OF CONTRACT, TORT OR OTHERWISE, ARISING FROM, OUT OF OR IN
    CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN THE SOFTWARE.
 
-   ******************************************************************************
- */
+******************************************************************************
+*/
+
 #include <stdio.h>
 #include <stdlib.h>
 #include <stdarg.h>
+#include <assert.h>
 
 #include <unistd.h>
 #include <fcntl.h>
@@ -58,8 +60,10 @@ int decode_hdlc_construct (ifax_modp self, va_list args);
 int encode_serial_construct (ifax_modp self, va_list args);
 int debug_construct (ifax_modp self, va_list args);
 int V29demod_construct (ifax_modp self, va_list args);
+int syncbit_construct(ifax_modp self,va_list args);
 
-extern signed short rate_7k2_8k_1[250];
+extern ifax_sint16 rate_7k2_8k_1[250];
+extern ifax_sint16 rate_8k_7k2_1[252];
 
 #include <ifax/modules/replicate.h>
 
@@ -81,6 +85,7 @@ ifax_module_id IFAX_FAXCONTROL;
 ifax_module_id IFAX_LINEDRIVER;
 ifax_module_id IFAX_SIGNALGEN;
 ifax_module_id IFAX_V29DEMOD;
+ifax_module_id IFAX_SYNCBIT;
 
 void
 setup_all_modules (void)
@@ -103,6 +108,7 @@ setup_all_modules (void)
   IFAX_SIGNALGEN = ifax_register_module_class ("Simple signal generator", signalgen_construct);
   IFAX_LINEDRIVER = ifax_register_module_class ("Linedriver", linedriver_construct);
   IFAX_V29DEMOD = ifax_register_module_class ("V.29 Demodulator", V29demod_construct);
+  IFAX_SYNCBIT = ifax_register_module_class("Bit syncronization",syncbit_construct);
 }
 
 void
@@ -368,7 +374,6 @@ test_v29demod (void)
   /* Feed the signal to the line-driver for transmission */
   linedriver = ifax_create_module (IFAX_LINEDRIVER);
   ifax_command (linedriver, CMD_LINEDRIVER_AUDIO);
-  ifax_command (linedriver, CMD_LINEDRIVER_FILE);
 
   /* V.29 Demodulation */
   v29demod = ifax_create_module (IFAX_V29DEMOD);
@@ -393,11 +398,46 @@ test_v29demod (void)
     {
       remaining -= ifax_command (linedriver, CMD_LINEDRIVER_WORK);
     }
-  ifax_command (linedriver, CMD_LINEDRIVER_CLOSE);
 }
 
 
+void test_new_v21_demod(void)
+{
+  ifax_modp v21mod, rateconvert, v21demod, sync;
+  ifax_modp debug;
 
+  /* V.21 channel 1 modulator to make a clean signal at 7200 samples/s */
+  v21mod = ifax_create_module(IFAX_MODULATORV21,1);
+  assert(v21mod!=0);
+
+  /* Rateconvert from 7200 Hz to 8000 Hz */
+  rateconvert = ifax_create_module(IFAX_RATECONVERT, 10, 9, 250,
+				   rate_7k2_8k_1, 0x10000);
+  assert(rateconvert!=0);
+
+  /* V.21 demodulator */
+  v21demod = ifax_create_module(IFAX_FSKDEMOD,8000,980,1180,300);
+  assert(v21demod!=0);
+
+  /* Syncronization circuit */
+  sync = ifax_create_module(IFAX_SYNCBIT,8000,300);
+  assert(sync!=0);
+
+  /* Debug result ... */
+  debug = ifax_create_module(IFAX_DEBUG, 0, DEBUG_FORMAT_CONFIDENCE,
+			     DEBUG_METHOD_STDOUT);
+  assert(debug!=0);
+
+  /* Line up */
+  ifax_connect((ifax_modp)0,v21mod);
+  ifax_connect(v21mod,rateconvert);
+  ifax_connect(rateconvert,v21demod);
+  /* ifax_connect(v21demod,sync); */
+  ifax_connect(v21demod,debug);
+  ifax_connect(debug,(ifax_modp)0);
+
+  ifax_handle_input(v21mod,"\0\0\0\0\0\0\0\0",64);
+}
 
 
 void main (int argc, char **argv)
@@ -412,7 +452,8 @@ void main (int argc, char **argv)
   /* test_scrambler(); */
   /* test_hdlc(); */
   /* test_linedriver(); */
-  test_v29demod ();
+  /* test_v29demod (); */
+  test_new_v21_demod();
 
   exit (0);
 }

@@ -35,7 +35,7 @@
 #include <sys/times.h>
 #include <ifax/ifax.h>
 #include <ifax/modules/decode_hdlc.h>
-//#include <ifax/modules/faxcontrol.h>
+#include <ifax/modules/faxcontrol.h>
 
 #define MAXLENGTH	1024
 
@@ -248,7 +248,7 @@ int	faxcontrol_construct(ifax_modp self,va_list args)
 	self->handle_input	=faxcontrol_handle;
 	self->command		=faxcontrol_command;
 
-//	priv->baud=va_arg(args,int);
+	/* priv->baud=va_arg(args,int); */
 
 	priv->length=0;	/* Init to 0 bytes in queue */
 	return 0;

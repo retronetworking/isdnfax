@@ -36,6 +36,7 @@
 #include <stdarg.h>
 #include <sys/times.h>
 #include <ifax/ifax.h>
+#include <ifax/constants.h>
 
 /* Turn on to generate a big bunch of debugging code.
  */
@@ -53,7 +54,7 @@ typedef struct {
  */
 void	fskmod_destroy(ifax_modp self)
 {
-	fskmod_private *priv=(fskmod_private *)self->private;
+	/* fskmod_private *priv=(fskmod_private *)self->private; */
 
 	free(self->private);
 
@@ -77,7 +78,7 @@ int	fskmod_handle(ifax_modp self, void *data, size_t length)
 
 		priv->currphase+= *input++ ? priv->p1 : priv->p2 ;
 		dat=int2alaw((int)(0.62*2147483647.0*sin(priv->currphase)));
-//		dat=linear2ulaw((short)(25000.0*sin(priv->currphase)));
+		/* dat=linear2ulaw((short)(25000.0*sin(priv->currphase))); */
 #if 0
 		ifax_dprintf(DEBUG_DEBUG,"Phases: %8.5f %11d %5d %11d %11d\n",sin(priv->currphase),
 			(int)(2147483647.0*sin(priv->currphase)),
@@ -102,8 +103,8 @@ int	fskmod_construct(ifax_modp self,va_list args)
 
 	priv->f1  =va_arg(args,int);
 	priv->f2  =va_arg(args,int);
-	priv->p1  =(double)2.0*M_PI * (double)priv->f1 / SAMPLES_PER_SECOND ;
-	priv->p2  =(double)2.0*M_PI * (double)priv->f2 / SAMPLES_PER_SECOND ;
+	priv->p1  =(double)2.0*IFAX_PI*(double)priv->f1 / SAMPLES_PER_SECOND;
+	priv->p2  =(double)2.0*IFAX_PI*(double)priv->f2 / SAMPLES_PER_SECOND;
 	priv->currphase=0.0;
 
 	ifax_dprintf(DEBUG_DEBUG,"Phases : %f %f\n",priv->p1,priv->p2);

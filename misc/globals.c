@@ -28,7 +28,9 @@
 
 #include <ifax/module.h>
 #include <ifax/misc/globals.h>
+#include <ifax/misc/hardware-driver.h>
 
 char *progname = "amodemd";
 int run_as_daemon = 0;
 ifax_modp linedriver;
+struct HardwareHandle *hh = 0;

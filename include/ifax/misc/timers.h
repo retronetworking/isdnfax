@@ -26,6 +26,12 @@
 ******************************************************************************
 */
 
+#ifndef _IFAX_MISC_TIMERS_H
+#define _IFAX_MISC_TIMERS_H
+
+#include <sys/time.h>
+#include <unistd.h>
+
 #include <ifax/types.h>
 
 #define MAX_TIMERS 10
@@ -33,3 +39,12 @@
 extern void reset_timers(void);
 extern void decrease_timers(ifax_sint32);
 extern void one_shot_timer(int, ifax_sint32);
+
+typedef struct {
+	struct timeval expires;
+} hard_timer_t;
+
+void hard_timer_init(hard_timer_t *ht, ifax_uint32 sec, ifax_uint32 usec);
+int hard_timer_expired(hard_timer_t *ht);
+
+#endif

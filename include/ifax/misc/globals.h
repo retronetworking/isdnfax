@@ -30,4 +30,5 @@
 
 extern char *progname;        /* Name of executable/program */
 extern int run_as_daemon;     /* nonzero if running as daemon */
-extern ifax_modp linedriver;  /* Common linedriver */
+extern ifax_modp linedriver;		/* Common linedriver */
+extern struct HardwareHandle *hh;	/* Phone line */

@@ -29,6 +29,7 @@
 #include <ifax/module.h>
 #include <ifax/types.h>
 #include <ifax/misc/regmodules.h>
+#include <ifax/misc/statemachine.h>
 #include <ifax/G3/fax.h>
 #include <ifax/G3/fsm.h>
 #include <ifax/modules/signalgen.h>
@@ -86,8 +87,13 @@ void initialize_G3fax(ifax_modp linedriver)
   /* The HDLC-encode is used both by the "binary coded signal"
    * and high-speed fax transfers.
    */
-
   fax->encoderHDLC = ifax_create_module(IFAX_ENCODER_HDLC);
+
+  /* The G3 fax-machine code needs a statemachine for the protocol
+   * handeling.
+   */
+  fax->statemachines = fsm_allocate(1);
+  fsm_setup(fax->statemachines,0,2048);
 
   ifax_connect(fax->rateconv7k2to8k0,linedriver);
 

@@ -32,12 +32,12 @@
  * port.
  */
 
-
 #include <stdio.h>
 
 #include <sys/types.h>
 #include <sys/stat.h>
 #include <sys/timeb.h>
+#include <sys/time.h>
 #include <fcntl.h>
 #include <termios.h>
 #include <unistd.h>
@@ -391,12 +391,10 @@ void pty_service_read(struct PtyHandle *ph)
 	if ( logsize1 < chunk )
 		goto all_ok;
 
-	if ( ph->rx.wp >= PTY_BUFFERSIZE )
-		ph->rx.wp = 0;
+	ph->rx.wp = 0;
 	if ( (chunk = PTY_BUFFERSIZE - ph->rx.size) == 0 )
 		goto all_ok;
 
-	ph->rx.wp = 0;
 	log2 = &ph->rx.buffer[ph->rx.wp];
 	logsize2 = read(ph->ptyfd,log2,chunk);
 	if ( logsize2 < 0 ) {
@@ -492,7 +490,7 @@ void pty_printf(struct PtyHandle *ph, char *format, ... )
 	char tmp[PTY_PRINTF_MAXSIZE+4];
 
 	va_start(args,format);
-	vsnprintf(tmp, PTY_PRINTF_MAXSIZE, format, args);
+	vsprintf(tmp, format, args);
 	va_end(args);
 
 	pty_write(ph,tmp,strlen(tmp));

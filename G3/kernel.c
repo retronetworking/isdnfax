@@ -36,5 +36,5 @@ struct G3fax *fax;
 
 void fax_run_internals(void)
 {
-  run_statemachines();
+	fsm_run(fax->statemachines);
 }

@@ -43,6 +43,7 @@
 #include <sys/times.h>
 #include <ifax/ifax.h>
 #include <ifax/alaw.h>
+#include <ifax/constants.h>
 
 /* Turn on to generate a big bunch of debugging code.
  */
@@ -149,7 +150,7 @@ static void init_four_help(fskdemod_private *priv,four_help *hlp,int depth,int f
 	ftptr=hlp->fasttable;
 	for(x=0;x<hlp->stdepth/256;x++)
 	{
-		sinval=sin(x*2.0*M_PI*(double)freq/(double)priv->sps);
+		sinval=sin(x*2.0*IFAX_PI*(double)freq/(double)priv->sps);
 		for(y=0;y<256;y++)
 			*ftptr++=((int)(sinval*532610.0*wala2sint[y])) >> 
 				 ((sizeof(int)-sizeof(char))*8);

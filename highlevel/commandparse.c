@@ -398,6 +398,53 @@ int do_fth(struct ModemHandle *mh, struct PtyHandle *ph,
 int do_dial(struct ModemHandle *mh, struct PtyHandle *ph,
 	    char *prebuf,char **postbuf,mdmcmd *cmd)
 {
+#define MAXDIALDIGITS 64
+	char dialnum[MAXDIALDIGITS];
+	int t;
+	char c;
+
+	t = 0;
+	while ( t < (MAXDIALDIGITS-1) ) {
+		c = **postbuf;
+		if ( c >= '0' && c <= '9' ) {
+			dialnum[t++] = c;
+			*postbuf++;
+			continue;
+		}
+		if ( c == 'w' || c == 'W' || c == ',' ) {
+			*postbuf++;
+			continue;
+		}
+
+		break;
+	}
+
+	dialnum[t] = '\0';
+
+	if ( !last_command(mh,ph) )	/* Should be last command on line */
+		return 1;
+
+	if ( dialnum[0] == '\0' )	/* A simple ATD(T) should give OK */
+		return 1;
+
+	/* We have a valid ATD command; we have to test if all is well
+	 * (not allready online....) and initialize the correct mode
+	 * and signalling chain.
+	 */
+
+	/* FIXME: Check for online allready here */
+
+	/* The following function initializes timers, signalling chain
+	 * etc. depending on the mode of the modem.  Currently, we only
+	 * opt for Fax class one support, and maybe 300 bit/s data.
+	 */
+
+	setup_call(mh);
+
+	
+	
+		
+			
 #if 0
 	/* This is a hack by becka it seems, disable it for now */
 	char *dummy="+FRH=3";

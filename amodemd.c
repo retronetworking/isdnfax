@@ -4,7 +4,7 @@
    Fax program for ISDN.
    Initial startup of daemon 'amodemd' - contains main() etc.
 
-   Copyright (C) 1999 Morten Rolland [Morten.Rolland@asker.mail.telia.com]
+   Copyright (C) 1999-2000 Morten Rolland [Morten.Rolland@asker.mail.telia.com]
 
    Permission is hereby granted, free of charge, to any person obtaining a
    copy of this software and associated documentation files (the "Software"),
@@ -60,13 +60,18 @@
 #include <ifax/misc/pty.h>
 #include <ifax/highlevel/commandparse.h>
 
-static struct IsdnHandle *ih;
 static struct PtyHandle *ph;
 static struct ModemHandle *mh;
 
-/* Parse command-line arguments and bail out with an error message if
- * something is wrong.
+
+/*
+ * Parse command-line arguments and bail out with an error message if
+ * something is wrong.  Variables 'argc' and 'argv' must be set prior
+ * to calling these functions (e.g. initialized by 'main').
  */
+
+static int argc, argn;
+static char **argv, **arg;
 
 static void usage(void)
 {
@@ -74,10 +79,22 @@ static void usage(void)
 	exit(1);
 }
 
-static void parse_arguments(int argc, char **argv)
+static int option(const char *option, int num)
 {
-	int t;
+	if ( strcmp(argv[argn],option) )
+		return 0;
 
+	if ( argn + num <= argc ) {
+		arg = argv + argn;
+		return 1;
+	}
+
+	usage();
+	return 0;	/* Silence compiler */
+}
+
+static void parse_arguments(void)
+{
 	if ( argc > 0 && argv[0] != 0 ) {
 		progname = rindex(argv[0],'/');
 		if ( progname != 0 ) {
@@ -87,65 +104,60 @@ static void parse_arguments(int argc, char **argv)
 		}
 	}
 
-	t = 1;
-	while ( t < argc ) {
+	argn = 1;
+	while ( argn < argc ) {
 
-		if ( !strcmp("-c",argv[t]) ) {
-			t++;
-			if ( t >= argc )
-				usage();
-			config_file = argv[t];
-			t++;
+		if ( option("-c",2) ) {
+			config_file = arg[1];
+			continue;
 		}
 
-		if ( !strcmp("-D",argv[t]) ) {
-			t++;
+		if ( option("-D",1) ) {
 			run_as_daemon = 1;
+			continue;
 		}
+
+		usage();
 	}
 }
 
+/*
+ * The main loop of the entire program.  All concurrent operations are
+ * scheduled from here.  The inner select function takes care of waiting
+ * for input/output, and all other parts of the system is designed to
+ * cooperate with this inner loop.
+ *
+ * No part of the system can be allowed to block, as this will stall the
+ * main loop, and thus possible stall some other important part of the
+ * system (like the DSP chain or AT command parser).
+ *
+ * The main loop will only exit in case of an unrecoverable error.
+ */
+
 static void main_loop(void)
 {
-	fd_set rfd, wfd;
+	fd_set rfd, wfd, efd;
 	int maxfd, rc;
 	struct timeval delay;
 
-	printf("Main loop....\n");
+	ifax_dprintf(DEBUG_INFO,"Entering main loop\n");
 
 	for (;;) {
 		FD_ZERO(&rfd);
 		FD_ZERO(&wfd);
+		FD_ZERO(&efd);
+		maxfd = -1;
 
-		/* Watch the ISDN-line for more incomming samples */
-		FD_SET(ih->fd,&rfd);
-		maxfd = ih->fd + 1;
-
-		/* Watch the pty for incomming AT-commands or data */
+		hh->prepare_select(hh,&maxfd,&rfd,&wfd,&efd);
 		pty_prepare_select(ph,&maxfd,&rfd,&wfd);
 
 		delay.tv_sec = 0;
 		delay.tv_usec = 500000;
 
-		/* Do the actual waiting (sleeping).  When this select
-		 * system call is made, the rest of the system can run when
-		 * using the real-time scheduler.
-		 */
-		rc = select(maxfd, &rfd, (fd_set *)0, (fd_set *)0, &delay);
+		rc = select(maxfd, &rfd, &wfd, &efd, &delay);
 
 		pty_service_read(ph);
-
-		rc = IsdnService(ih);
-		if ( rc == ISDN_RINGING ) {
-			pty_write(ph,"\nRING\n\n",7);
-#if 0
-			/* Not gotten far enough for testing this yet... */
-			if ( IsdnAnswer(ih) ) {
-				setup_incomming();
-				handle_call();
-			}
-#endif
-		}
+		hh->service_select(hh,&rfd, &wfd, &efd);
 
 		modeminput(mh,ph);
 
@@ -156,11 +168,19 @@ static void main_loop(void)
 
 /* Startup point for 'amodemd' - parse args, initialize and off we go */
 
-void main(int argc, char **argv)
+void main(int ac, char **av)
 {
-	parse_arguments(argc,argv);
+	argc = ac;
+	argv = av;
+
+	parse_arguments();
 	read_configuration_file();
 
+	if ( hh == 0 ) {
+		ifax_dprintf(DEBUG_LAST,"No hardware device configured\n");
+		exit(1);
+	}
+	
 	if ( run_as_daemon )
 		start_daemon();
 
@@ -175,10 +195,10 @@ void main(int argc, char **argv)
 
 	ph = pty_initialize("/dev/ptyp9");
 	mh = modem_initialize();
-	ih = IsdnInit(isdn_device,isdn_msn);
 
 	linedriver = ifax_create_module(IFAX_LINEDRIVER);
-	ifax_command(linedriver,CMD_LINEDRIVER_ISDN,ih);
+	ifax_command(linedriver,CMD_LINEDRIVER_ISDN,hh);
+
 	/* ifax_command(linedriver,CMD_LINEDRIVER_AUDIO); */
 	/* ifax_command(linedriver,CMD_LINEDRIVER_RECORD,"modem.dat"); */
 

@@ -105,7 +105,7 @@ typedef struct {
 
   int dsp_fd;                     /* File-descriptor for audio-monitoring */
   int rec_fd;                     /* File-descriptor for recording */
-  struct IsdnHandle *ih;          /* Handle for the ISDN interface */
+  struct HardwareHandle *hh;	  /* Handle for the phone interface */
   int loopback;                   /* Nonzero if software loopback enabled */
   ifax_sint32 dsp_rx_volume;      /* Audio-monitoring Rx-level */
   ifax_sint32 dsp_tx_volume;      /* Audio-monitoring Tx-level */
@@ -302,8 +302,8 @@ static int linedriver_command(ifax_modp self, int cmd, va_list cmds)
       priv->dsp_fd = init_audio();
       break;
 
-    case CMD_LINEDRIVER_ISDN:
-      priv->ih = va_arg(cmds,struct IsdnHandle *);
+    case CMD_LINEDRIVER_HARDWARE:
+      priv->hh = va_arg(cmds,struct HardwareHandle *);
       break;
 
     case CMD_LINEDRIVER_LOOPBACK:

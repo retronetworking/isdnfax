@@ -4,7 +4,7 @@
    Fax program for ISDN.
    Communicate with the /dev/ttyI* devices to transfer audio over ISDN
 
-   Copyright (C) 1999 Morten Rolland [Morten.Rolland@asker.mail.telia.com]
+   Copyright (C) 1999-2000 Morten Rolland [Morten.Rolland@asker.mail.telia.com]
   
    Permission is hereby granted, free of charge, to any person obtaining a
    copy of this software and associated documentation files (the "Software"),
@@ -30,7 +30,11 @@
  * general transfering of audio over ISDN.  The /dev/ttyI* devices
  * are used to access the underlying device-drivers.  Audio over
  * the ISDN-ttys must be supported by the low-level ISDN-driver used.
+ * The set of functions defined in this file are designed to co-exist
+ * and work with the hardware abstraction layer in 'hardware-driver.c'
  */
+
+#define FSM_DEBUG_STATES
 
 #include <stdio.h>
 #include <time.h>
@@ -47,837 +51,861 @@
 #include <ifax/alaw.h>
 #include <ifax/misc/isdnline.h>
 #include <ifax/misc/malloc.h>
+#include <ifax/misc/statemachine.h>
+#include <ifax/misc/hardware-driver.h>
+#include <ifax/misc/iobuffer.h>
+#include <ifax/misc/timers.h>
+
+/* These are some standard sequences we are searching for among AT commands
+ * and their responses.  Some of these sequences are known as 'async'
+ * messages, since thay can appear seemingly from nowhere (RING indication).
+ */
+#define ISDN_MESSAGE_MASK				0x7fffff00
+#define ISDN_MESSAGE_OK					0x00000100
+#define ISDN_MESSAGE_CRLF				0x00000200
+#define ISDN_MESSAGE_ERROR				0x00000400
+#define ISDN_MESSAGE_VCON				0x00000800
+#define ISDN_MESSAGE_BUSY				0x00001000
+#define ISDN_MESSAGE_NOCARRIER				0x00002000
+#define ISDN_MESSAGE_RING				0x00004000
+#define ISDN_MESSAGE_RING2				0x00008000
 
 
-/* New-line sequence used by the tty-device for AT-command exchanges */
-#define LINECHAR1 '\r'
-#define LINECHAR2 '\n'
-#define CMDLNECHR '\r'
+/* Initialize an 'fd_set' to work with the ISDN devices.  We only need to
+ * know when there are anything to read.  When there is something to read,
+ * we will write tha same ammount.  This works since ISDN has input and
+ * output samples clocked by the same clock.  We still have to handle
+ * all the fd-sets since other device types may need them.
+ */
 
-
-void display_incomming(struct IsdnHandle *);
-
-/* Function to help debugging */
-
-static void format_ascii(char *dst, char *src, int dstsize, int srcsize)
+static void isdn_prepare_select(struct HardwareHandle *hh, int *maxfd,
+				fd_set *rfd, fd_set *wfd, fd_set *efd)
 {
-  int t;
-  char c, tmp[16];
+	struct IsdnHandle *ih = hh->private;
 
-  dst[0] = 0;
-  for ( t=0; t < srcsize; t++ ) {
-    c = src[t];
-    switch ( c ) {
-      case '\r':
-	strcpy(tmp,"\\r");
-	break;
-      case '\n':
-	strcpy(tmp,"\\n");
-	break;
-      default:
-	if ( c < 0x20 || c > 126 )
-	  sprintf(tmp,"\\0%03o",((unsigned int)c)&255);
-	else
-	  sprintf(tmp,"%c",c);
-	break;
-    }
-    strcat(dst,tmp);
-    if ( strlen(dst) > (dstsize-9) ) {  /* 9 chars:  \ 0 3 7 7 . . . \0 */
-      if ( t < (dstsize-1) )
-	strcat(dst,"...");
-      return;
-    }
-  }
+	if ( ih->fd < 0 )
+		return;
+
+	if ( ih->fd > *maxfd )
+		*maxfd = ih->fd;
+
+	FD_SET(ih->fd,rfd);
 }
 
 
-/* Helper function to sleep for a short while.  This is needed when
- * the ttyI-driver is opened with nonblocking-IO as the driver needs
- * some time to come up with a response to the AT-commands.
- * Time to sleep in range 1-99 (hundreds of a second).
+/* When the isdn device has been configured, the following function is called
+ * to carry out the initialization itself.  This function opens the device
+ * and starts the state machine which will complete the initialization and
+ * handle all further actions on the isdn device.
  */
 
-void IsdnShortSleep(int hundreds)
+static void isdn_initialize(struct HardwareHandle *hh)
 {
-  struct timeval sleep;
+	struct termios isdnsetting;
+	struct IsdnHandle *ih = hh->private;
 
-  sleep.tv_sec = 0;
-  sleep.tv_usec = hundreds * 10000;
+	if ( (ih->fd=open(ih->device,O_RDWR|O_NONBLOCK)) < 0 ) {
+		ih->fd = -1;
+		hh->error = 1;
+		sprintf(hh->errormsg,"Can't open '%s': %s",ih->device,
+			strerror(errno));
+		return;
+	}
 
-  select(0,(fd_set *)0, (fd_set *)0, (fd_set *)0, &sleep);
-}
+	if ( tcgetattr(ih->fd,&isdnsetting) < 0 ) {
+		hh->error = 1;
+		sprintf(hh->errormsg,"Unable to tcgetattr for '%s'",
+			ih->device);
+		close(ih->fd);
+		ih->fd = -1;
+		return;
+	}
 
+	isdnsetting.c_iflag = 0;
+	isdnsetting.c_oflag = 0;
+	isdnsetting.c_lflag = 0;
 
-/* Use this function to wait for input on the ISDN-device that is
- * known to arrive - ie. echo and responces from AT-commands.
- * The function will timeout after the specified time has elapsed.
- */
+	isdnsetting.c_cflag &= ~(CSIZE | CSTOPB | PARENB | PARODD | CLOCAL);
+	isdnsetting.c_cflag |=  (CS8 | CREAD | HUPCL | CLOCAL | CRTSCTS);
 
-static void IsdnWaitForInput(struct IsdnHandle *ih, int sec, int usec)
-{
-  fd_set rfds;
-  struct timeval timeout;
-
-  FD_ZERO(&rfds);
-  FD_SET(ih->fd, &rfds);
-  timeout.tv_sec = sec;
-  timeout.tv_usec = usec;
-
-  select(ih->fd+1, &rfds, (fd_set *)0, (fd_set *)0, &timeout);
-}
-
-
-/* Helper function to read from a non-blocking device, with EAGAIN
- * filtered out to make life easier.  The return value still should be
- * checked for other errors.
- */
-
-static int nonblock_read(int fd, void *buf, int size)
-{
-  int retval;
-
-  retval = read(fd,buf,size);
-
-  if ( retval >= 0 ) {
-    return retval;
-  }
-
-  if ( errno == EAGAIN )
-    return 0;
-
-  return -1;
-}
-
-
-/* Copy the input-buffer of the ISDN-device (ring-buffer) into
- * a linear buffer for easy parsing.  This function should be
- * avoided for large volume data, unless each call actually
- * results in equal advances for the buffer.
- */
-
-int IsdnCopyInput(struct IsdnHandle *ih, char *dst, int size)
-{
-  int retsize = 0;
-  int src, chunk;
-
-  if ( ih->recbufsize < size )
-    size = ih->recbufsize;
-
-  src = ih->recbufrp;
-
-  if ( ih->recbufrp + size > ISDNRECBUF_SIZE ) {
-    chunk = ISDNRECBUF_SIZE - ih->recbufrp;
-    memcpy(dst,&ih->recbuf[src],chunk);
-    dst += chunk;
-    retsize += chunk;
-    size -= chunk;
-    src = 0;
-  }
-
-  memcpy(dst,&ih->recbuf[src],size);
-  retsize += size;
-
-  return retsize;
+	if ( tcsetattr(ih->fd, TCSANOW, &isdnsetting) < 0 ) {
+		hh->error = 1;
+		sprintf(hh->errormsg,"Unable to tcsetattr for '%s'",
+			ih->device);
+		close(ih->fd);
+		ih->fd = -1;
+		return;
+	}
 }
 
 
 /* Read as much as possible from the ISDN-device and queue up in the
- * IsdnHandle structure for later use.  The queue is in raw-format:
- * interpretation of DLE etc. is done later, by the read-functions.
- *
- * This function may flag an error in the IsdnHandle structure.
+ * IsdnHandle structure.  The queue is in raw-format: interpretation
+ * of DLE etc. is not done here.  If the fd_sets are supplied, they
+ * are used to speed things up if possible (return immediately if no
+ * data).
  */
 
-static void IsdnReadDevice(struct IsdnHandle *ih)
+static void isdn_service_select(struct HardwareHandle *hh, fd_set *rfd,
+				fd_set *wfd, fd_set *efd)
 {
-  int max, actual;
-
-  if ( ih->error || ih->recbufsize >= ISDNRECBUF_SIZE )
-    return;
-
-  if ( ih->recbufwp < ih->recbufrp ) {
-    /* One segment to be filled */
-    max = ih->recbufrp - ih->recbufwp;
-    actual = nonblock_read(ih->fd,&ih->recbuf[ih->recbufwp],max);
-    if ( actual < 0 )
-      goto readfail;
-    ih->recbufwp += actual;
-    ih->recbufsize += actual;
-  } else {
-    /* Possibly two segments to be filled */
-    max = ISDNRECBUF_SIZE - ih->recbufwp;
-    actual = nonblock_read(ih->fd,&ih->recbuf[ih->recbufwp],max);
-    if ( actual < 0 )
-      goto readfail;
-    ih->recbufwp += actual;
-    ih->recbufsize += actual;
-    if ( actual == max ) {
-      /* We have to wrap and fill second segment too */
-      max = ih->recbufrp;
-      actual = nonblock_read(ih->fd,&ih->recbuf[0],max);
-      if ( actual < 0 )
-	goto readfail;
-      ih->recbufwp = actual;
-      ih->recbufsize += actual;
-    }
-  }
-
-  return;
-
- readfail:
-
-  sprintf(ih->errormsg,"Unable to read from %s: %s",
-	  ih->devname,strerror(errno));
-  ih->error = 1;
-  return;
-}
-
-
-/* Send a binary string of bytes directly to the ISDN-audio subsystem.
- * This function is used for all write operations on the device.
- */
-
-static void IsdnSendRaw(struct IsdnHandle *ih, char *cmd, int size)
-{
-  int retval;
-
-  if ( ih->error )
-    return;
-
-  retval = write(ih->fd,cmd,size);
-
-  if ( retval == size )
-    return;
-
-  if ( retval < 0 ) {
-    perror("Can't write to ISDN-driver");
-    exit(1);
-  }
-
-  exit(54);
-}
-
-
-/* Flush all received data for the ISDN-device.  This operation can be
- * used to get out of a messy state (like during initialization).
- */
-
-static void IsdnFlushInput(struct IsdnHandle *ih)
-{
-  ih->recbufrp = ih->recbufwp = ih->recbufsize = 0;
-
-  if ( ih->error )
-    return;
-
-  IsdnWaitForInput(ih,0,50000);     /* 0.05 seconds timeout */
-  IsdnReadDevice(ih);
-
-  while ( ih->recbufsize > 0 ) {
-    ih->recbufrp = ih->recbufwp = ih->recbufsize = 0;
-    IsdnWaitForInput(ih,0,20000);
-    IsdnReadDevice(ih);
-  }
-
-  ih->recbufrp = ih->recbufwp = ih->recbufsize = 0;
-}
-
-
-/* Skip a given number of bytes in the receive buffer, probably
- * because it has already been captured by IsdnCopyInput.
- */
-
-static void IsdnAdvanceInput(struct IsdnHandle *ih, int size)
-{
-  if ( ih->recbufsize < size ) {
-    ih->recbufrp = ih->recbufwp = ih->recbufsize = 0;
-    return;
-  }
-
-  ih->recbufsize -= size;
-  ih->recbufrp += size;
-  if ( ih->recbufrp >= ISDNRECBUF_SIZE )
-    ih->recbufrp -= ISDNRECBUF_SIZE;
-}
-
-
-/* Read a line into a buffer.  A line is everything up to
- * the terminating CR or CR+LF characters.  NOTE: If the line is too long,
- * it will not be possible to read it, and -1 is returned.  Also
- * note that sleeping up to one second is done to wait for data.
- */
-
-int IsdnGetLine(struct IsdnHandle *ih, char *buf, int size, int devread)
-{
-  char tmp[ISDNMAXLNE_SIZE+4];
-  int t, s, u;
-
-  for ( u=0; u < 5; u++ ) {
-
-    s = IsdnCopyInput(ih,tmp,size+2);
-
-    if ( s > 0 ) {
-      tmp[s] = 0;
-      /* format_ascii(str,tmp,1000,s);
-	 printf("IsdnCopyLine: '%s'\n",str); */
-    }
-
-    for ( t=0; t < s; t++ ) {
-
-      if ( tmp[t] == LINECHAR1 && tmp[t+1] == LINECHAR2 ) {
-	/* Found CR+LF, return everything up to this point */
-	memcpy(buf,tmp,t);
-	buf[t] = 0;
-	IsdnAdvanceInput(ih,t+2);
-	return t;
-      }
-
-      if ( tmp[t] == CMDLNECHR ) {
-	/* Found single AT-command termination character, use it */
-	memcpy(buf,tmp,t);
-	buf[t] = 0;
-	IsdnAdvanceInput(ih,t+1);
-	return t;
-      }
-    }
-
-    if ( !devread )
-      return -1;
-
-    IsdnWaitForInput(ih,0,100000);       /* 0.1 second timeout */
-    IsdnReadDevice(ih);
-    if ( ih->error )
-      return -1;
-  }
-
-  return -1;   /* Very long line or no data.  Flush may be in order */
-}
-
-
-/* When a line is received on the ttyI-interface, it may be for two
- * reasons: It may be an echo or response of an AT-command, or it may
- * be an asynchronous signal (RING) from the interface.  The following
- * function tests any line to see if it is a ring-indication.
- * If not, all is well.  If it is, the information is parsed and
- * stored for later action.
- */
-
-static int IsdnIsAsync(struct IsdnHandle *ih, char *buf)
-{
-  if ( !strcmp(buf,"") ) {
-    /* Difficult to say... may be the start of a RING or NO CARRIER */
-    goto async;
-  }
-
-  if ( !strcmp(buf,"RING") ) {
-    /* No doubt... */
-    ih->ringing = 1;
-    goto async;
-  }
-
-  if ( !strncmp(buf,"CALLER NUMBER: ",15) ) {
-    /* Record remote-MSN */
-    strcpy(ih->remotemsn,&buf[15]);
-    goto async;
-  }
-
-  if ( !strcmp(buf,"NO CARRIER") ) {
-    /* Oops, connection lost */
-    ih->mode = TTYIMODE_CMDOFFLINE;
-    ih->ringing = 0;
-    goto async;
-  }
-
-  return 0;
-
- async:
-
-  /* printf("Async: %s\n",buf); */
-  return 1;
-}
-
-
-/* After the ttyI-driver has been initialized, the following function is
- * used to send AT-commands.  The returned echo is checked, return value
- * is read, and other strange responses like 'RING' is taken care
- * of (inbetween commands).
- *
- * This function may flag an error in the IsdnHandle structure.
- */
-
-static void IsdnSendCommand(struct IsdnHandle *ih, char *cmd, int ack, int res)
-{
-  char command[ISDNMAXLNE_SIZE+4], tmp[4];
-  char echo[ISDNMAXLNE_SIZE+4];
-
-  if ( ih->error )
-    return;
-
-  strcpy(command,cmd);
-  tmp[0] = CMDLNECHR;
-  tmp[1] = 0;
-  strcat(command,tmp);
-
-  IsdnSendRaw(ih,command,strlen(command));
-  if ( ih->error ) {
-    printf("Barf...\n");
-    return;
-  }
-
-  for (;;) {
-    IsdnGetLine(ih,echo,ISDNMAXLNE_SIZE,1);
-    if ( ih->error ) {
-      printf("Barf2...\n");
-      return;
-    }
-    if ( !IsdnIsAsync(ih,echo) )
-      break;
-  }
-
-  if ( strcmp(cmd,echo) ) {
-    sprintf(ih->errormsg,"Command '%s' echoed '",cmd);
-    format_ascii(command,echo,ISDNERRMSG_SIZE-strlen(echo)-5,strlen(echo));
-    strcat(ih->errormsg,command);
-    strcat(ih->errormsg,"'");
-    printf("%s\n",ih->errormsg);
-    ih->error = 1;
-    return;
-  }
-
-  ih->cmdresult[0] = 0;
-  if ( res ) {
-    /* Some commands returns a result - only one line results are supported */
-    for (;;) {
-      IsdnGetLine(ih,ih->cmdresult,ISDNMAXLNE_SIZE,1);
-      if ( !IsdnIsAsync(ih,ih->cmdresult) )
-	break;
-    }
-    printf("Command '%s' gave '%s'\n",cmd,ih->cmdresult);
-  }
-
-  if ( ack ) {
-    /* This command is expected to give the 'OK' acknowledgement */
-    for (;;) {
-      IsdnGetLine(ih,echo,ISDNMAXLNE_SIZE,1);
-      if ( !IsdnIsAsync(ih,echo) )
-	break;
-    }
-    if ( strcmp(echo,"OK") ) {
-      printf("Command '%s' didn't 'OK' (%s)\n",cmd,echo);
-      exit(1);
-    }
-
-    if ( ! res ) {
-      printf("Command '%s' OK\n",cmd);
-    }
-  }
-}
-
-
-/* Try to initialize the ISDN-device for audio transfer.  The
- * initialization sequence attempts to bootstrap the ttyI* devices
- * from a very low level, to assure a valid initialization even
- * with very strange default settings.
- */
-
-static void IsdnInitialize(struct IsdnHandle *ih, char *msn)
-{
-  char cmd[64];
-
-  /* Try to initialize S3+S4 to CR+LF ... very paranoid, and will
-   * only work if CR or NL is recognized as a command termination
-   * character (which it probably will).
-   */
-
-  sprintf(cmd,"%cATS3=%d%c",LINECHAR1,LINECHAR1,LINECHAR1);
-  IsdnSendRaw(ih,cmd,strlen(cmd));
-
-  sprintf(cmd,"%cATS3=%d%c",LINECHAR2,LINECHAR1,LINECHAR2);
-  IsdnSendRaw(ih,cmd,strlen(cmd));
-
-  sprintf(cmd,"%cATS4=%d%c",LINECHAR1,LINECHAR2,LINECHAR1);
-  IsdnSendRaw(ih,cmd,strlen(cmd));
-
-  sprintf(cmd,"%cATS4=%d%c",LINECHAR2,LINECHAR2,LINECHAR2);
-  IsdnSendRaw(ih,cmd,strlen(cmd));
-
-
-  /* The new-line sequence should be CR+LF now ... It seems the
-   * ISDN4Linux kernel is hardwired to CR+LF, in which case it is
-   * not important to initialize S3 and S4, but now it is done...
-   */
-
-  sprintf(cmd,"ATE1%c",CMDLNECHR);         /* Enable echo of commands */
-  IsdnSendRaw(ih,cmd,strlen(cmd));
-
-  sprintf(cmd,"ATV1%c",CMDLNECHR);         /* English responses */
-  IsdnSendRaw(ih,cmd,strlen(cmd));
-
-  IsdnFlushInput(ih);  /* Echo or not, it is probably just rubish anyway */
-
-
-  /* The AT-command interface should be properly initialized now,
-   * continue using the 'IsdnSendCommand' for the rest of the AT-commands.
-   */
-
-  /* Let the device identify itself and check if we can use it */
-  IsdnSendCommand(ih,"ATI",1,1);
-  if ( strcmp(ih->cmdresult,"Linux ISDN") ) {
-    sprintf(ih->errormsg,
-	    "Device '%s' not supported (Only 'Linux ISDN')",
-	    ih->cmdresult);
-    ih->error = 1;
-    return;
-  }
-
-  sprintf(cmd,"AT&E%s",msn);               /* Set phone-number to use */
-  IsdnSendCommand(ih,cmd,1,0);
-
-  IsdnSendCommand(ih,"AT+FCLASS=8",1,0);   /* Enable audio */
-
-  IsdnSendCommand(ih,"AT+VSM=5",1,0);      /* A-law encoding */
-
-  IsdnSendCommand(ih,"AT+VLS=2",1,0);      /* Use phone-line */
-
-  IsdnSendCommand(ih,"ATS18=1",1,0);       /* Set audio-service only */
-
-  IsdnSendCommand(ih,"ATS14=4",1,0);       /* Transparent layer 2 (audio) */
-}
-
-
-/* Open the Isdn-device and prepare for audio-transmission.  If the variable
- * 'error' in the IsdnHandle struct is nonzero, the operation failed, and a
- * description of the problem will be in the 'errormsg' array.
- * The ISDN-device is opened in NONBLOCK mode to make things run smooth
- * with multiple input sources (needs to use select to do this).
- */
-
-struct IsdnHandle *IsdnInit(char *device, char *msn)
-{
-  struct termios isdnsetting;
-  struct IsdnHandle *ih;
-
-  ih = ifax_malloc(sizeof(*ih),"Isdn Handle");
-
-  ih->fd = -1;
-  ih->error = 0;
-  ih->mode = TTYIMODE_CMDOFFLINE;
-  strncpy(ih->devname,device,ISDNDEVNME_SIZE);
-  ih->devname[ISDNDEVNME_SIZE-1] = 0;
-
-  ih->recbufrp = 0;
-  ih->recbufwp = 0;
-  ih->recbufsize = 0;
-  ih->start_time = time((time_t)0);
-  ih->end_time = 0;
-
-  if ( (ih->fd=open(device,O_RDWR|O_NONBLOCK)) < 0 ) {
-    ih->error = 1;
-    ih->fd = -1;
-    sprintf(ih->errormsg,"Can't open '%s'",device);
-    return ih;
-  }
-
-  if ( tcgetattr(ih->fd,&isdnsetting) < 0 ) {
-    ih->error = 1;
-    sprintf(ih->errormsg,"Unable to read terminal settings for '%s'",device);
-    close(ih->fd);
-    ih->fd = -1;
-    return ih;
-  }
-
-  isdnsetting.c_iflag = 0;
-  isdnsetting.c_oflag = 0;
-  isdnsetting.c_lflag = 0;
-
-  isdnsetting.c_cflag &= ~(CSIZE | CSTOPB | PARENB | PARODD | CLOCAL);
-  isdnsetting.c_cflag |=  (CS8 | CREAD | HUPCL | CLOCAL | CRTSCTS);
-
-  if ( tcsetattr(ih->fd, TCSANOW, &isdnsetting) < 0 ) {
-    ih->error = 1;
-    sprintf(ih->errormsg,"Unable to set terminal settings for '%s'",device);
-    close(ih->fd);
-    ih->fd = -1;
-    return ih;
-  }
-
-  IsdnInitialize(ih,msn);
-
-  return ih;
-}
-
-
-/* The 'IsdnService' function is called whenever there is any data
- * available on the 'ih->fd' device-handle - Ie. someone is calling.
- */
-
-int IsdnService(struct IsdnHandle *ih)
-{
-  char buffer[ISDNMAXLNE_SIZE+4], tmp[80];
-  int x;
-
-  IsdnReadDevice(ih);
-  for (;;) {
-    x = IsdnGetLine(ih,buffer,ISDNMAXLNE_SIZE,0);
-    if ( x < 0 )
-      break;
-    if ( !IsdnIsAsync(ih,buffer) ) {
-      /* Strange, unwanted info is comming our way ... ? */
-      format_ascii(tmp,buffer,72,x);
-      printf("Unrecognized data: '%s'\n",tmp);
-      display_incomming(ih);         /* _______ */
-    }
-  }
-
-  if ( ih->ringing )
-    return ISDN_RINGING;
-
-  return ISDN_SLEEPING;
-}
-
-
-/* When 'IsdnService' says there is an ISDN_RINGING condition, this
- * function can be called to establish the connection.  The function
- * returns nonzero when a (two-way) connection is established.
- */
-
-int IsdnAnswer(struct IsdnHandle *ih)
-{
-  ih->ringing = 0;
-
-  IsdnSendCommand(ih,"ATA",0,1);
-
-  if ( !strcmp(ih->cmdresult,"NO ANSWER") ) {
-    /* False alarm, no incomming call, or hung up already */
-    ih->mode = TTYIMODE_CMDOFFLINE;
-    ih->remotemsn[0] = 0;
-    return 0;
-  }
-
-  if ( strcmp(ih->cmdresult,"VCON") ) {
-    /* Didn't get the expected VCON */
-    ih->error = 1;
-    strcpy(ih->errormsg,"Issuing ATA didn't result in 'VCON' as it should");
-    return 0;
-  }
-
-  ih->mode = TTYIMODE_AUDIO;
-  IsdnSendCommand(ih,"AT+VTX+VRX",0,0);
-
-  return 1;
-}
-
-
-/* Starting an outgoing call is done with the following 'IsdnDial'
- * function, with the phone-number and timeout (in seconds) as the
- * argument.  The phone-number must be all digits, no commas, 'w' or space.
- */
-
-int IsdnDial(struct IsdnHandle *ih, char *number, int timeout)
-{
-  char cmd[128], buffer[128], str[512];
-  int t, r;
-
-  sprintf(cmd,"ATD%s",number);
-  IsdnSendCommand(ih,cmd,0,0);
-
-  for ( t=0; t < timeout; t++ ) {
-
-    printf("Waiting for response to DIAL...\n");
-    IsdnWaitForInput(ih,1,0);
-    IsdnReadDevice(ih);
-    printf("got some or timeout\n");
-
-    for (;;) {
-      r = IsdnGetLine(ih,buffer,120,0);
-      if ( r < 0 )
-	break;
-      printf("GotLine: '%s'\n",buffer);
-      if ( !IsdnIsAsync(ih,buffer) )
-	goto checkanswer;
-    }
-  }
-
-  /* We have a timeout - hang up the connection; use the direct
-   * approach to avoid having a 'VCON' mess up at a critical time.
-   */
-
-  printf("Timeout, hanging up\n");
-
-  sprintf(cmd,"%cATH%c",CMDLNECHR,CMDLNECHR);
-  IsdnSendRaw(ih,cmd,strlen(cmd));
-  IsdnFlushInput(ih);
-
-  return ISDN_NOANSWER;
-
- checkanswer:
-
-  if ( !strcmp(buffer,"VCON") ) {
-    ih->mode = TTYIMODE_AUDIO;
-    IsdnSendCommand(ih,"AT+VTX+VRX",0,0);
-    return ISDN_ANSWER;
-  }
-
-  if ( !strcmp(buffer,"BUSY") )
-    return ISDN_BUSY;
-
-  ih->error = 1;
-  format_ascii(str,buffer,512,strlen(buffer));
-  sprintf(ih->errormsg,"Got unknown response when dialing: '%s'",str);
-
-  return ISDN_FAILED;
-}
-
-/* Send a series of samples over the ISDN-line by using this function.
- * The full-scale 16-bit signed integers are converted to a-Law before
- * they are transmitted.
- * NOTE: This function may not write all the samples that was requested
- * due to a buffer overflow, hangup or other.  This is not checked for,
- * so overflows should be avoided by not sending more than is reveived.
- */
-
-void IsdnWriteSamples(struct IsdnHandle *ih, ifax_sint16 *src, int size)
-{
-  int t;
-  ifax_uint8 alaw, *dst;
-  ifax_sint16 s16;
-  ifax_uint16 idx;
-
-  if ( ih->mode != TTYIMODE_AUDIO )
-    return;
-
-  dst = &ih->txbuf[0];
-
-  for ( t=0; t < size; t++ ) {
-    s16 = *src++;
-    idx = (((ifax_uint16)s16)>>4) & 0xFFF;
-    alaw = sint2wala[idx];
-    *dst++ = alaw;
-    if ( alaw == ISDNTTY_DLE )
-      *dst++ = alaw;
-  }
-
-  write(ih->fd,&ih->txbuf[0],dst-&ih->txbuf[0]);
-}
-
-/* Read audio-samples from the ISDN-system once we are online.  Works
- * much like an ordinary read, with partial reads indicating there is
- * no more data available at this point.  A complete read should be
- * followed by another read, since there may be more data waiting
- * to get off the buffers.
- */
-
-int IsdnReadSamples(struct IsdnHandle *ih, ifax_sint16 *dst, int size)
-{
-  int remaining, more, chunk;
-  ifax_uint8 alaw, *src, *end;
-
-  if ( ih->mode != TTYIMODE_AUDIO )
-    return -1;
-
-  remaining = size;
-
-  do {
-
-    /* Read device until it empties or request completes */
-    IsdnReadDevice(ih);
-    more = ih->recbufsize == ISDNRECBUF_SIZE;
-
-    while ( remaining > 0 ) {
-
-      /* We need at least two samples to handle DLE+? simply/efficiently */
-      if ( ih->recbufsize < 2 )
-	break;
-
-      /* Set up 'src' and 'chunk' for processing so that chunk+1 bytes are
-       * available for investigation.  The extra byte is for DLE-examination.
-       */
-
-      src = &ih->recbuf[ih->recbufrp];
-
-      if ( ih->recbufwp <= ih->recbufrp ) {
-	/* Read from the read-pointer to the end of the ring-buffer */
-	chunk = ISDNRECBUF_SIZE - ih->recbufrp;
-	if ( ih->recbufwp > 0 ) {
-	  /* ih->recbuf[0] is valid, use it as the 'chunk+1' byte */
-	  ih->recbuf[ISDNRECBUF_SIZE] = ih->recbuf[0];
-	} else {
-	  /* ih->recbuf[0] is invalid, reduce chunk to make 'chunk+1' valid */
-	  chunk--;
+	struct IsdnHandle *ih = hh->private;
+
+	static hardware_state_t last_state = 999999;	/* none */
+
+	static char *device_state[9] = {
+		"UNKNOWN",
+		"INITIALIZING",
+		"FAILED",
+		"IDLE",
+		"RINGING",
+		"CALLING",
+		"ONLINE",
+		"BUSY",
+		"NOANSWER"
+	};
+
+	if ( hh->state != last_state ) {
+		ifax_dprintf(DEBUG_DEBUG,"Changed state to %s\n",
+			     device_state[hh->state]);
+		last_state = hh->state;
 	}
-      } else {
-	/* Read section from read-pointer to write-pointer in ring-buffer */
-	chunk = ih->recbufwp - ih->recbufrp - 1;
-      }
 
-      if ( chunk > remaining )
-	chunk = remaining;
+	if ( (rfd == 0 || FD_ISSET(ih->fd,rfd)) && !hh->error )
+		iobuffer_read(ih->incomming_buffer,ih->fd);
 
-      end = &ih->recbuf[ih->recbufrp+chunk];
-
-      while ( src < end ) {
-	alaw = *src++;
-	if ( alaw != ISDNTTY_DLE ) {
-	  /* Pure sample value to be converted */
-	  *dst++ = wala2sint[alaw];
-	} else {
-	  /* DLE-escape sequence, see what it is */
-	  alaw = *src++;
-	  if ( alaw == ISDNTTY_DLE ) {
-	    /* Escaped a-Law code (bitreversed) of 0x10 */
-	    *dst++ = wala2sint[alaw];
-	    remaining++;
-	   } else {
-	     /* The DLE-escape is out of band signaling (no sample) */
-	     remaining += 2;
-	     if ( alaw == ISDNTTY_ETX ) {
-	       /* DLE+ETX indicates a remote hangup */
-	       ih->mode = TTYIMODE_CMDOFFLINE;
-
-	       /* Calculate how much work has been done, and return */
-	       chunk = src - &ih->recbuf[ih->recbufrp];
-	       remaining -= chunk;
-	       ih->recbufsize -= chunk;
-	       ih->recbufrp += chunk;
-	       if ( ih->recbufrp >= ISDNRECBUF_SIZE )
-		 ih->recbufrp -= ISDNRECBUF_SIZE;
-	       return size - remaining;
-	     }
-	   }
-	}
-      }
-
-      chunk = src - &ih->recbuf[ih->recbufrp];
-      remaining -= chunk;
-      ih->recbufsize -= chunk;
-      ih->recbufrp += chunk;
-      if ( ih->recbufrp >= ISDNRECBUF_SIZE )
-	ih->recbufrp -= ISDNRECBUF_SIZE;
-    }
-  } while ( more );
-
-  return size - remaining;
+	fsm_run(ih->smh);
 }
 
-void display_incomming(struct IsdnHandle *ih)
+
+/* Write a set of voice samples to the ISDN device.  The samples are in the
+ * form of an array, containing 16-bit signed, linear values.
+ * The array is *modified* by this function to the linear values actually
+ * transmitted.  This is to help an echo cancel function to work on the true
+ * values as sent over the ISDN line to the remote end.
+ *
+ * The number of samples that needs to be sent is dictated by the value
+ * in the hardware driver handle: hh->write_size.  This function will assume
+ * there are exactly this many samples in the 'src' array.
+ */
+
+static void isdn_write_samples(struct HardwareHandle *hh, ifax_sint16 *src)
 {
-  char buf[4], c, str[32];
+	struct IsdnHandle *ih = hh->private;
+	ifax_uint8 *dst, wala;
+	ifax_uint16 linear;
+	int t;
+	
+	dst = &ih->tmp_write[0];
 
-  for (;;) {
-    while ( ih->recbufsize > 0 ) {
-      c = ih->recbuf[ih->recbufrp];
-      ih->recbufrp++;
-      ih->recbufsize--;
-      if ( ih->recbufrp >= ISDNRECBUF_SIZE )
-	ih->recbufrp = 0;
+	for ( t=0; t < hh->write_size; t++ ) {
 
-      buf[0] = c;
-      buf[1] = 0;
-      format_ascii(str,buf,20,1);
-      printf("%s",str);
-      fflush(stdout);
-    }
+		linear = (ifax_uint16) *src;
+		wala = sint2wala[linear>>4];
+		*src++ = 8 * wala2sint[wala];	/* fill with quantized value */
 
-    IsdnWaitForInput(ih,1,0);
-    IsdnReadDevice(ih);
-  }
+		if ( wala == ISDNTTY_DLE )
+			*dst++ = wala;
+		*dst++ = wala;
+	}
+
+	iobuffer_fill(ih->outgoing_buffer,&ih->tmp_write[0],
+		      dst - &ih->tmp_write[0]);
 }
+
+
+/* To configure an isdn device, we need to know the isdn tty to use, and
+ * what MSN (message subscriber number) that it should use.
+ */
+
+static void isdn_configure(struct HardwareHandle *hh, char *param, char *value)
+{
+	struct IsdnHandle *ih = hh->private;
+	int len = strlen(value);
+
+	if ( !strcmp(param,"msn") ) {
+		if ( len >= ISDNMSN_SIZE ) {
+			hh->error = 1;
+			strcpy(hh->errormsg,"isdn-msn is too long");
+			return;
+		}
+		strcpy(ih->ourmsn,value);
+		return;
+	}
+
+	if ( !strcmp(param,"device") ) {
+		if ( len >= ISDNDEVNME_SIZE ) {
+			hh->error = 1;
+			strcpy(hh->errormsg,"isdn-device is too long");
+			return;
+		}
+		strcpy(ih->device,value);
+		return;
+	}
+
+	hh->error = 1;
+	sprintf(hh->errormsg,"Unrecognized configuration option '%s'",param);
+}
+
+
+/* The following function needs to be called before going to sleep on a
+ * select, so that we fill the ISDN output buffer so that will not
+ * underrun anytime soon.
+ */
+
+void isdn_service_readwrite(struct HardwareHandle *hh)
+{
+	struct IsdnHandle *ih = hh->private;
+	
+	iobuffer_write(ih->outgoing_buffer,ih->fd);
+}
+
+
+/* Trigger a dial to a certain phone number.  This function can only be
+ * called when the hardware driver is in the IDLE state.
+ */
+
+void isdn_dial(struct HardwareHandle *hh, char *number)
+{
+	struct IsdnHandle *ih = hh->private;
+
+	ifax_dprintf(DEBUG_INFO,"Dialing triggered for %s\n",number);
+
+	if ( hh->state != IDLE ) {
+		ifax_dprintf(DEBUG_ERROR,"Dialing out of place!\n");
+		return;
+	}
+
+	if ( ih->request_dial )
+		return;
+
+	strcpy(ih->dialmsn,number);
+	ih->request_dial = 1;
+}
+
+
+/* Allocate the Isdn-device and prepare for configuration and intialization
+ * at a later stage.  If the variable 'error' in the IsdnHandle struct is
+ * nonzero, the operation failed, and a description of the problem will be
+ * in the 'errormsg' array. The ISDN-device is opened in NONBLOCK mode to
+ * make things run smooth with multiple input sources (needs to use select
+ * to do this).
+ */
+
+FSM_DEFSTATE(isdn_start_state)
+
+void isdn_allocate(struct HardwareHandle *hh)
+{
+	struct IsdnHandle *ih;
+
+	ih = ifax_malloc(sizeof(*ih),"Isdn hardware driver handle");
+	hh->private = ih;
+
+	ih->smh = fsm_allocate(1);			/* Needs one FSM */
+	fsm_setup(ih->smh,0,512);			/* ... stack=512 */
+	fsm_init(ih->smh,0,isdn_start_state,100,hh);	/* Initialize */
+
+	ih->fd = -1;
+	ih->device[0] = '\0';
+	ih->ourmsn[0] = '\0';
+	ih->remotemsn[0] = '\0';
+
+	ih->incomming_buffer = iobuffer_allocate(512,"ISDN/I");
+	ih->outgoing_buffer = iobuffer_allocate(512,"ISDN/O");
+
+	hh->configure = isdn_configure;
+	hh->initialize = isdn_initialize;
+
+	hh->prepare_select = isdn_prepare_select;
+	hh->service_select = isdn_service_select;
+	/*	hh->read = ___; */
+	hh->write = isdn_write_samples;
+	hh->service_readwrite = isdn_service_readwrite;
+	hh->dial = isdn_dial;
+	/*	hh->hangup = ___; */
+}
+
+/***************************************************************************
+ *
+ * The following functions are helper functions called from the state
+ * machine below, but not as a proper state.
+ */
+
+static void debug_message(unsigned int msg, int terminate)
+{
+	int level = DEBUG_DEBUG;
+
+	if ( terminate )
+		level = DEBUG_LAST;
+
+	if ( msg & ISDN_MESSAGE_OK )
+		ifax_dprintf(level,"Message 'OK' received\n");
+	if ( msg & ISDN_MESSAGE_CRLF )
+		ifax_dprintf(level,"Message 'CRLF' received\n");
+	if ( msg & ISDN_MESSAGE_ERROR )
+		ifax_dprintf(level,"Message 'ERROR' received\n");
+	if ( msg & ISDN_MESSAGE_VCON )
+		ifax_dprintf(level,"Message 'VCON' received\n");
+	if ( msg & ISDN_MESSAGE_BUSY )
+		ifax_dprintf(level,"Message 'BUSY' received\n");
+	if ( msg & ISDN_MESSAGE_NOCARRIER )
+		ifax_dprintf(level,"Message 'NOCARRIER' received\n");
+	if ( msg & ISDN_MESSAGE_RING )
+		ifax_dprintf(level,"Message 'RING' received\n");
+	if ( msg & ISDN_MESSAGE_RING2 )
+		ifax_dprintf(level,"Message 'RING2' received\n");
+
+	if ( terminate && (msg & 0xffffff00) ) {
+		ifax_dprintf(level,"Previous messages came unexpected\n");
+		exit(1);
+	}
+}
+
+
+/***************************************************************************
+ *
+ * The rest of this file is a Finite State Machine for administrating
+ * the ISDN /dev/ttyI* interface.  These are the functions that do the main
+ * work, the isdn entery functions defined above basically sets up a few
+ * variables and waits for the state-machine to carry out the work.
+ */
+
+/*
+ * The statemachine used here has the main user pointer pointing to the
+ * hardware handle structure.  This structure has a private pointer that
+ * points to the ISDN structure/variables.  These structures are
+ * accessed as hh->... and ih->... in the statemachine.
+ * In order to be able to access these variables, they need to be
+ * declared and initialized.  This is done by the following macros, which
+ * are activated when defining a state by using the appropriate NEEDS_* macro.
+ */
+
+#define ISDN_FSM_DECL_hh struct HardwareHandle *hh = fsmself->private;
+#define ISDN_FSM_DECL_ih struct IsdnHandle *ih = hh->private;
+
+#define NEEDS_none	/* No state-machine related variables needed */
+#define NEEDS_hh	ISDN_FSM_DECL_hh
+#define NEEDS_ih	ISDN_FSM_DECL_hh ISDN_FSM_DECL_ih
+#define NEEDS_hh_ih	ISDN_FSM_DECL_hh ISDN_FSM_DECL_ih
+
+/*
+ * Variables can be allocated on the statemachine stack inside of a subroutine
+ * so there can be persistent variables across several states of a subroutine.
+ */
+struct generic_isdn_locals {
+	hard_timer_t htimer1;
+	hard_timer_t htimer2;
+	int misc1;
+	int misc2;
+};
+
+#define ISDN_FSM_DECL_local \
+	struct generic_isdn_locals *local = FSM_SETUPFRAME;
+
+#define NEEDS_local	ISDN_FSM_DECL_local
+#define NEEDS_local_hh	ISDN_FSM_DECL_local ISDN_FSM_DECL_hh
+#define NEEDS_local_ih	ISDN_FSM_DECL_local ISDN_FSM_DECL_hh ISDN_FSM_DECL_ih
+#define NEEDS_local_hh_ih NEEDS_local_ih
+
+FSM_DEFSTATE(isdn_junk_incomming)
+
+FSM_DEFSTATE(start_initialize_isdn)
+FSM_DEFSTATE(isdn_enter_idle_state)
+FSM_DEFSTATE(do_at_command_with_OK)
+FSM_DEFSTATE(do_at_command)
+FSM_DEFSTATE(do_at_command_get_result)
+
+
+/*************************************************************************
+ *
+ * This state is the initial state of the FSM used to get everything
+ * started.  It will simply wait until the physical device is opened,
+ * and run a simple check on the ISDN device and continue (or fail).
+ */
+
+FSM_DEFSTATE(check_flushing_isdn_ok)
+
+FSM_STATE(NEEDS_hh_ih,isdn_start_state)
+	if ( ih->fd >= 0 ) {
+		/* When device is physically opened, initialize it */
+		hh->state = INITIALIZING;
+		FSMCALLJUMP(isdn_junk_incomming,check_flushing_isdn_ok,0);
+	}
+FSM_END
+
+FSM_STATE(NEEDS_hh,check_flushing_isdn_ok)
+	if ( FSMRETVAL ) {
+		/* ISDN system seems to behave well, continue init */
+		ifax_dprintf(DEBUG_JUNK,"Device opened\n");
+		FSMCALLJUMP(start_initialize_isdn,isdn_enter_idle_state,0);
+	}
+	/* The device was not "silent", continuing would be pointless */
+	hh->state = FAILED;
+FSM_END
+
+
+/**************************************************************************
+ *
+ * Main operational states of the ISDN line driver subsystem.  State
+ * 'isdn_enter_idle_state' is called after initialization, and everything
+ * is taken from there.  Depending on what state the system is in,
+ * the API functions will try to alter variables to initiate various
+ * operations or responses.  The state machine is totally in control as
+ * to what happens to the ISDN layer, so the API functions can only
+ * request certain operations, and monitor their progress.
+ */
+
+FSM_DEFSTATE(isdn_main_loop_idle)
+FSM_DEFSTATE(isdn_start_dial)
+FSM_DEFSTATE(isdn_start_dial2)
+
+FSM_STATE(NEEDS_hh_ih,isdn_enter_idle_state)
+	/* Set everything up before entering the main loop */
+	hh->state = IDLE;
+	ih->request_hangup = 0;		/* Hangup is a NOP when idle */
+	ih->request_answer = 0;		/* Answer when idle is confused */
+	ih->request_dial = 0;		/* Not yet ... */
+	FSMJUMP(isdn_main_loop_idle);
+FSM_END
+
+
+FSM_STATE(NEEDS_hh_ih,isdn_main_loop_idle)
+	/* This is where we loop on an unused system with no ISDN
+	 * activity.
+	 */
+	if ( ih->request_dial ) {
+		ih->request_dial = 0;
+		if ( hh->state == IDLE )
+			FSMJUMP(isdn_start_dial);
+	}
+FSM_END
+
+
+/***************************************************************************
+ *
+ * The 'isdn_start_dial' takes care of setting up an outgoing call.
+ * Phone number to call must already be loaded into the ih->dialmsn[] array.
+ */
+
+FSM_DEFSTATE(endless_loop)
+FSM_DEFSTATE(isdn_start_dial2)
+FSM_DEFSTATE(isdn_start_dial3)
+
+FSM_STATE(NEEDS_hh_ih,isdn_start_dial)
+	hh->state = CALLING;
+	ih->start_time = time(0);
+	sprintf(ih->at_cmd,"ATD%s",ih->dialmsn);
+	FSMCALLJUMP(do_at_command,isdn_start_dial2,0);
+FSM_END
+
+FSM_STATE(NEEDS_none,isdn_start_dial2)
+	/* Wait for response from tty after dialing */
+	FSMCALLJUMP(do_at_command_get_result,isdn_start_dial3, 0
+		    | ISDN_MESSAGE_VCON
+		    | ISDN_MESSAGE_BUSY
+		    | ISDN_MESSAGE_NOCARRIER);
+
+FSM_END
+
+FSM_STATE(NEEDS_none,isdn_start_dial3)
+	ifax_dprintf(DEBUG_JUNK,"Dialing done: Message=%d\n",FSMRETVAL);
+	FSMJUMP(endless_loop);
+FSM_END
+
+FSM_STATE(NEEDS_none,endless_loop)
+	/* Keep spending time here ... */
+FSM_END
+
+
+/***************************************************************************
+ *
+ * Subroutines to read any junk that may come from the ISDN device
+ * and flush any unwritten output to it.
+ */
+
+#define JUNK_INCOMMING_MAX_TIME		1,0		/* One second */
+#define JUNK_INCOMMING_SILENCE_TIME	0,100000	/* 1/10 second */
+
+FSM_DEFSTATE(isdn_junk_incomming_swallow)
+
+/*
+ * Read all that comes from the ISDN device for up to one second and throw
+ * the received data away.  If we expirience 0.1 second of silence, assume
+ * device has turned quiet and has no more data queued up.  If data keeps
+ * arriving for more than one second, an error is returned.
+ *
+ * Returns: 0 when error
+ *          1 when ok
+ */
+FSM_STATE(NEEDS_local,isdn_junk_incomming)
+	FSM_ALLOCFRAME(sizeof(struct generic_isdn_locals));
+	hard_timer_init(&local->htimer1,JUNK_INCOMMING_MAX_TIME);
+	hard_timer_init(&local->htimer2,JUNK_INCOMMING_SILENCE_TIME);
+     	FSMJUMP(isdn_junk_incomming_swallow);
+FSM_END
+
+FSM_STATE(NEEDS_local_ih,isdn_junk_incomming_swallow)
+	/* Just read everything from the ISDN device until one of the
+	 * timers expire.
+	 */
+	if ( ih->incomming_buffer->size > 0 ) {
+		/* There is some 'junk' - throw it away and reset timer */
+		iobuffer_reset(ih->incomming_buffer);
+		hard_timer_init(&local->htimer2,JUNK_INCOMMING_SILENCE_TIME);
+		FSMYIELD;
+	}
+
+	/* If MAX_TIME has elapsed, give up and report failure */
+	if ( hard_timer_expired(&local->htimer1) )
+		FSMRETURN(0);
+
+	/* If SILENCE timer expired, we have (some) silence and report ok */
+	if ( hard_timer_expired(&local->htimer2) )
+		FSMRETURN(1);
+FSM_END
+
+/*
+ * Flush the outgoing ISDN queue.  This is used during initialization, and
+ * possibly at other times when samples needs to be flushed before ioctl,
+ * close/open etc.  No return value, it hangs until output buffer is
+ * emptied.
+ */
+
+FSM_STATE(NEEDS_hh_ih,flush_outgoing)
+	if ( ih->outgoing_buffer->size == 0 ) {
+		/* Outgoing buffer has been emptied, our job is done */
+		FSMRETURN(0);
+	}
+FSM_END
+
+
+/****************************************************************************
+ *
+ * Initialize the ISDN /dev/ttyI* interface by issuing AT-commands to
+ * prepare everything for voice transfers.
+ */
+
+FSM_DEFSTATE(start_initialize_isdn2)
+FSM_DEFSTATE(start_initialize_isdn3)
+FSM_DEFSTATE(start_initialize_isdn4)
+FSM_DEFSTATE(start_initialize_isdn5)
+
+FSM_STATE(NEEDS_hh_ih,start_initialize_isdn)
+	/* Feed all the 'AT-commands' needed to initialize to the
+	 * isdn device and monitor their responses.  The very first
+	 * initialization will just write a series of AT-commands
+	 * to stabalize the tty and simply discard the echo/results.
+	 */
+	static char *cold_cmd =
+		"\rATS3=13\r\nATS3=13\n"	/* S3=13 (CR=carrige return) */
+		"\rATS4=10\r\nATS4=10\n"	/* S4=10 (LF=Line feed) */
+		"\rATE0\r"			/* Echo disabled */
+		"ATV1\r";			/* English responses */
+
+	iobuffer_fill(ih->outgoing_buffer,(ifax_uint8 *)cold_cmd,
+		      strlen(cold_cmd));
+	FSMCALLJUMP(flush_outgoing,start_initialize_isdn2,0);
+FSM_END
+
+FSM_STATE(NEEDS_none,start_initialize_isdn2)
+	/* Discard any output from the ISDN device that may have been
+	 * caused by the AT commands in the previous state.  This is
+	 * to complete the "initialize from unknown state", and all
+	 * programming of the ISDN device is done properly after this.
+	 */
+	FSMCALLJUMP(isdn_junk_incomming,start_initialize_isdn3,0);
+FSM_END
+
+FSM_STATE(NEEDS_hh_ih,start_initialize_isdn3)
+	/* Start sending the 'proper' AT-commands to the ISDN driver.
+	 * Check if device is indeed ISDN first.  Also, initialize the
+	 * "response" flag array, which is updated with bit-masks for
+	 * all known fixed or handled responses, like RING, VCON, OK etc.
+	 * Some of these fixed messages may be delivered asynchronously,
+	 * which is handeled and logged at a lower level.  Indications
+	 * of which fixed messages have been received is flagged in the
+	 * ih->message variable.
+	 */
+	ih->messages = 0;
+	strcpy(ih->at_cmd,"ATI");
+	FSMCALLJUMP(do_at_command_with_OK,start_initialize_isdn4,0);
+FSM_END
+
+FSM_STATE(NEEDS_hh_ih,start_initialize_isdn4)
+	if ( FSMRETVAL >= 0x100 )
+		debug_message(FSMRETVAL,1);
+
+	if ( strcmp(ih->at_result,"Linux ISDN") ) {
+		/* Ooops, this seems to be something else */
+		ifax_dprintf(DEBUG_LAST,"Device not recognized as ISDN (%s)\n",
+			     ih->at_result);
+		exit(1);
+	}
+	sprintf(ih->at_cmd,"AT&E%s+FCLASS=8+VSM=5+VLS=2S18=1S14=4",ih->ourmsn);
+	FSMCALLJUMP(do_at_command_with_OK,start_initialize_isdn5,0);
+FSM_END
+
+FSM_STATE(NEEDS_none,start_initialize_isdn5)
+	if ( FSMRETVAL >= 0x100 )
+		debug_message(FSMRETVAL,1);
+
+	ifax_dprintf(DEBUG_INFO,"ISDN device initialized OK\n");
+
+	FSMRETURN(0);
+FSM_END
+
+
+
+/***************************************************************************
+ *
+ * Check if the current character stream from the ISDN device has any
+ * fixed messages inside (RING etc.) that needs special attention.
+ *
+ * If the character(s) in the buffer may be part of an async message,
+ * a short timer is activated and it is checked if more incomming
+ * characters are in the pipeline.  If so, they are read and checked
+ * against the async messages that we expect.
+ *
+ * Return values:
+ *     0		- Nothing available
+ *     1-255		- A single character available (no message)
+ *     ISDN_MESSAGE_*	- Message available (value 256-2G)
+ */
+
+static struct {
+	int message;
+	char *string;
+	int length;
+} isdn_message[] = {
+	{ 0, 0, 0 },			/* Unused; Index 0 used for "false" */
+
+	{ ISDN_MESSAGE_OK,		"\r\nOK\r\n", 6 },
+	{ ISDN_MESSAGE_ERROR,		"\r\nERROR\r\n", 9 },
+	{ ISDN_MESSAGE_VCON,		"\r\nVCON\r\n", 8 },
+	{ ISDN_MESSAGE_BUSY,		"\r\nBUSY\r\n", 8 },
+	{ ISDN_MESSAGE_NOCARRIER,	"\r\nNO CARRIER\r\n", 14 },
+	{ ISDN_MESSAGE_RING,		"\r\nRING\r\n", 8 },
+	{ ISDN_MESSAGE_RING2,		"\r\nCALLER NUMBER: ", 17 },
+	{ ISDN_MESSAGE_CRLF,		"\r\n", 2 },
+
+	{ 0, 0, 0 }			/* Terminate list */
+};
+
+FSM_DEFSTATE(isdn_get_next_msg2)
+FSM_DEFSTATE(isdn_get_next_msg3)
+FSM_DEFSTATE(isdn_get_next_msg4)
+
+
+/*
+ * Subroutine to get the next character or message from the ISDN device.
+ */
+
+FSM_STATE(NEEDS_none,isdn_get_next_msg)
+	FSMCALLJUMP(isdn_get_next_msg3,isdn_get_next_msg2,0);
+FSM_END
+
+FSM_STATE(NEEDS_none,isdn_get_next_msg2)
+	int arg;
+	char chr[16];
+	arg = FSMRETVAL;
+	if ( arg != 0 ) {
+		if ( arg >= 32 && arg < 127 )
+			sprintf(chr," '%c'",arg);
+		else
+			chr[0] = '\0';
+		ifax_dprintf(DEBUG_JUNK,"ISDN Message: %08x%s\n",arg,chr);
+	}
+	/* Act depending on the message; if there are more info like
+	 * a phone number comming, read this as well and store it.
+	 */
+	FSMRETURN(arg);
+FSM_END
+
+FSM_STATE(NEEDS_local,isdn_get_next_msg3)
+     	FSM_ALLOCFRAME(sizeof(struct generic_isdn_locals));
+	hard_timer_init(&local->htimer1,0,100000);
+	FSMJUMP(isdn_get_next_msg4);
+FSM_END
+
+FSM_STATE(NEEDS_local_ih,isdn_get_next_msg4)
+	char *s1, *s2;
+	int t, length, x, partial_match, complete_match;
+	unsigned char tmp[128];
+
+	x = iobuffer_drain(ih->incomming_buffer,(unsigned char *)&tmp[0],100);
+	
+	/* Return if no data available after the delay */
+	if ( x == 0 ) {
+		if ( hard_timer_expired(&local->htimer1) )
+			FSMRETURN(0);
+		FSMYIELD;
+	}
+
+	/* Check if there is a message, or if there might be one
+	 * building up (only parts of it read so far).
+	 */
+	complete_match = partial_match = 0;
+	for ( t=1; isdn_message[t].length != 0; t++ ) {
+		length = isdn_message[t].length;
+		s1 = (char *)&tmp[0];
+		s2 = isdn_message[t].string;
+		if ( !complete_match && x >= length && !strncmp(s1,s2,length) )
+			complete_match = t;
+		
+		if ( x < length && !strncmp(s1,s2,x) ) {
+			partial_match = t;
+			break;
+		}
+	}
+
+	/* If we have partial matches, wait the timeout period for more */
+	if ( partial_match && !hard_timer_expired(&local->htimer1) )
+		FSMYIELD;
+
+	if ( complete_match ) {
+		length = isdn_message[complete_match].length;
+		iobuffer_drain_update(ih->incomming_buffer,length);
+		FSMRETURN(isdn_message[complete_match].message);
+	}
+
+	iobuffer_drain_update(ih->incomming_buffer,1);
+	FSMRETURN(tmp[0]);
+FSM_END
+
+#if 0
+FSM_STATE(NEEDS_ih,register_async_callerid)
+	ifax_dprintf(DEBUG_JUNK,"\n\n@@@@@@@@ CALLER-ID: %s\n\n\n",
+		     ih->at_tmp);
+	FSMRETURN(0);
+FSM_END
+
+/* This state is called whenever an async message is received to register
+ * the event.
+ */
+
+FSM_STATE(NEEDS_ih,register_async_event)
+	switch ( FSMGETARG ) {
+		case ASYNC_RING1:
+			ih->indication_ringing = 1;
+			FSMRETURN(0);
+			break;
+		case ASYNC_RING2:
+			ih->indication_ringing = 1;
+			FSMCALLJUMP(do_at_command_get_result,
+				    register_async_callerid,0);
+			break;
+	}
+FSM_END
+#endif
+
+
+/***************************************************************************
+ *
+ * Send an AT-command to the ISDN interface.
+ *
+ * Entery points for subroutine calls are:
+ *     - do_at_command_with_OK			for simple commands
+ *     - do_at_command				for more complex commands
+ *     - do_at_command_get_result		to read result of complex cmd.
+ *
+ * When calling 'do_at_command_with_OK' or 'do_at_command' the command
+ * string to be executed must be in ih->at_cmd (NUL terminated string)
+ *
+ * When do_at_command_with_OK or do_at_command_get_result are called, they
+ * will return the results in
+ *     - ih->at_cmd_result	First line of characters
+ *     - return value		Logical OR of all messages other than prime
+ *
+ * When calling 'do_at_command_get_result' the prime messages should be
+ * specified by logical ORing them as the argument.  The subroutine will
+ * scan for one of these messages and not return until found.  The
+ * 'do_at_command_with_OK' subroutine calls 'do_at_command_get_result'
+ * with ISDN_MESSAGE_OK as argument.
+ */
+
+FSM_DEFSTATE(do_at_command_send)
+FSM_DEFSTATE(do_at_command_with_OK2)
+FSM_DEFSTATE(do_at_command_with_OK3)
+FSM_DEFSTATE(do_at_command_get_result)
+FSM_DEFSTATE(do_at_command_get_result2)
+
+/*
+ * Execute a command that should return OK
+ */
+FSM_STATE(NEEDS_none,do_at_command_with_OK)
+     	FSMCALLJUMP(do_at_command_send,do_at_command_with_OK2,0);
+FSM_END
+
+FSM_STATE(NEEDS_none,do_at_command)
+	FSMJUMP(do_at_command_send);
+FSM_END
+
+FSM_STATE(NEEDS_hh_ih,do_at_command_send)
+	char *s, *d;
+	s = d = &ih->at_cmd[0];
+	while ( *s ) {
+		if ( *s != ' ' )
+			*d++ = *s;
+		s++;
+	}
+	*d++ = '\r';
+	*d = '\0';
+	iobuffer_fill(ih->outgoing_buffer,(ifax_uint8 *)ih->at_cmd,
+		      strlen(ih->at_cmd));
+	FSMRETURN(0);
+FSM_END
+
+FSM_STATE(NEEDS_none,do_at_command_with_OK2)
+	FSMCALLJUMP(do_at_command_get_result,do_at_command_with_OK3,
+		    ISDN_MESSAGE_OK);
+FSM_END
+
+FSM_STATE(NEEDS_none,do_at_command_with_OK3)
+	unsigned int msg = FSMRETVAL;
+
+	msg &= ~(ISDN_MESSAGE_OK | ISDN_MESSAGE_CRLF);
+	debug_message(msg,1);
+
+	FSMRETURN(msg);
+FSM_END
+
+FSM_STATE(NEEDS_local_ih,do_at_command_get_result)
+	FSM_ALLOCFRAME(sizeof(struct generic_isdn_locals));
+	ih->at_idx = 0;
+	local->misc1 = 0;
+	local->misc2 = FSMGETARG;
+	FSMCALLJUMP(isdn_get_next_msg,do_at_command_get_result2,0);
+FSM_END
+
+FSM_STATE(NEEDS_local_ih,do_at_command_get_result2)
+	int c = FSMRETVAL;
+
+	/* Should check if c == 0 and have a timeout to give a serious error */
+
+	if ( c > 0 && c < 0x100 ) {
+		/* Single character */
+		if ( ih->at_idx < ISDNATRESULT_SIZE-4 ) {
+			/* There is space in the result buffer yet */
+			ih->at_result[ih->at_idx++] = c;
+			ih->at_result[ih->at_idx] = '\0';
+		} else {
+			/* No space, or CR+LF allready found, log something */
+			local->misc1 |= c;
+		}
+	} else {
+		/* We have a 'message' - record it, chack for return cond. */
+		local->misc1 |= c;
+		if ( local->misc1 & local->misc2 ) {
+			/* One of the prime messages found, return */
+			FSMRETURN(local->misc1);
+		}
+	}
+
+	if ( c == ISDN_MESSAGE_CRLF && ih->at_idx > 0 ) {
+		/* Terminating CR+LF for first line reply, stop reading  */
+		ih->at_idx = ISDNATRESULT_SIZE;
+	}
+
+	/* Get another message or character, and restart this state */
+	FSMCALLJUMP(isdn_get_next_msg,do_at_command_get_result2,0);
+FSM_END

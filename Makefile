@@ -6,7 +6,7 @@ SUBDIRS = lib misc modules G3 highlevel
 MODULES = misc/misc.a modules/modules.a G3/g3.a lib/isdnlib.a \
 	highlevel/highlevel.a
 
-PROGRAMS = v21_softmodem amodemd #test
+PROGRAMS = amodemd              # v21_softmodem test
 
 all: subdirs $(PROGRAMS)
 

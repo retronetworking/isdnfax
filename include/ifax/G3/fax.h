@@ -33,20 +33,22 @@
 #define _G3_FAX_H
 
 struct G3fax {
-  ifax_modp linedriver;
-  ifax_modp rateconv7k2to8k0;
-  ifax_modp sinusCED;
-  ifax_modp sinusCNG;
-  ifax_modp silence;
-  ifax_modp scrambler;
-  ifax_modp modulatorV21;
-  ifax_modp modulatorV29;
-  ifax_modp encoderHDLC;
+	ifax_modp linedriver;
+	ifax_modp rateconv7k2to8k0;
+	ifax_modp sinusCED;
+	ifax_modp sinusCNG;
+	ifax_modp silence;
+	ifax_modp scrambler;
+	ifax_modp modulatorV21;
+	ifax_modp modulatorV29;
+	ifax_modp encoderHDLC;
 
-  ifax_modp fskd, dehdlc, faxctrl;
+	ifax_modp fskd, dehdlc, faxctrl;
 
-  ifax_uint8 DIS[32], CSI[32], NSF[32];
-  int DISsize, CSIsize, NSFsize;
+	struct StateMachinesHandle *statemachines;
+
+	ifax_uint8 DIS[32], CSI[32], NSF[32];
+	int DISsize, CSIsize, NSFsize;
 };
 
 extern struct G3fax *fax;

@@ -36,6 +36,8 @@
  * handled by hardware directely.
  */
 
+#include <stdio.h>
+
 #include <ifax/types.h>
 #include <ifax/G3/fax.h>
 #include <ifax/G3/kernel.h>
@@ -70,19 +72,19 @@
  * this one.
  */
 
-DEFGLOBALSTATE(fsm_wait_softsignal)
-DEFGLOBALSTATE(do_hard_exit)
+FSM_DEFSTATE(fsm_wait_softsignal)
+FSM_DEFSTATE(do_hard_exit)
 
 
 /* List states here that is called in a forward fashion (most of them) */
 
-DEFSTATE(start_answer_incomming)
-DEFSTATE(do_CED)
-DEFSTATE(done_CED)
-DEFSTATE(start_DIS)
-DEFSTATE(do_DIS)
-DEFSTATE(done_DIS)
-DEFSTATE(hunt_for_DCS_or_DTC)
+FSM_DEFSTATE(start_answer_incomming)
+FSM_DEFSTATE(do_CED)
+FSM_DEFSTATE(done_CED)
+FSM_DEFSTATE(start_DIS)
+FSM_DEFSTATE(do_DIS)
+FSM_DEFSTATE(done_DIS)
+FSM_DEFSTATE(hunt_for_DCS_or_DTC)
 
 
 /* Jump to 'start_answer_incomming' when an incomming call is
@@ -93,83 +95,78 @@ DEFSTATE(hunt_for_DCS_or_DTC)
 
 void fax_initialize_fsm_incomming()
 {
-  fax_setup_outgoing_DIS();   /* Prepare data-frames in 'fax' structure */
-  fax_setup_outgoing_NSF();
-  fax_setup_outgoing_CSI();
+	/* Prepare data-frames in 'fax' structure */
+	fax_setup_outgoing_DIS();
+	fax_setup_outgoing_NSF();
+	fax_setup_outgoing_CSI();
 
-  initialize_statemachines(); /* Reset all state-machines for a fresh start */
-  init_fsm(FSM_FAX_MAIN,start_answer_incomming);  /* Get the main one going */
+	fsm_init(fax->statemachines,0,start_answer_incomming,100,fax);
 
-  ifax_connect(fax->silence,fax->rateconv7k2to8k0);  /* Start off silent */
+	ifax_connect(fax->silence,fax->rateconv7k2to8k0);  /* Start silent */
 }
 
-STATE(start_answer_incomming)
-{
-  /* Stay silent for 0.2 seconds before outputing the CED */
-  FSMWAITJUMP(TIMER_AUX,ZEROPOINTTWOSECONDS,do_CED);
-}
+#define NEEDS_none	/* No state-machine variables needed */
 
-STATE(do_CED)
-{
-  /* Output the CED sinus signal for 3.8 sec */
-  ifax_connect(fax->sinusCED,fax->rateconv7k2to8k0);
-  FSMWAITJUMP(TIMER_AUX,THREEPOINTEIGHTSECONDS,done_CED);
-}
+FSM_STATE(NEEDS_none,start_answer_incomming)
+	/* Stay silent for 0.2 seconds before outputing the CED */
+	FSMWAITJUMP(TIMER_AUX,ZEROPOINTTWOSECONDS,do_CED);
+FSM_END
 
-STATE(done_CED)
-{
-  /* After the CED, wait 75ms and do the DIS */
-  ifax_connect(fax->silence,fax->rateconv7k2to8k0);
-  FSMWAITJUMP(TIMER_AUX,SEVENTYFIVEMILLISECONDS,start_DIS);
-}
+FSM_STATE(NEEDS_none,do_CED)
+	/* Output the CED sinus signal for 3.8 sec */
+	ifax_connect(fax->sinusCED,fax->rateconv7k2to8k0);
+	FSMWAITJUMP(TIMER_AUX,THREEPOINTEIGHTSECONDS,done_CED);
+FSM_END
 
-STATE(start_DIS)
-{
-  /* When we hook up the HDLC+V.21 they go online and send FLAGs */
-  ifax_connect(fax->modulatorV21,fax->rateconv7k2to8k0);
-  ifax_connect(fax->encoderHDLC,fax->modulatorV21);
+FSM_STATE(NEEDS_none,done_CED)
+	/* After the CED, wait 75ms and do the DIS */
+	ifax_connect(fax->silence,fax->rateconv7k2to8k0);
+	FSMWAITJUMP(TIMER_AUX,SEVENTYFIVEMILLISECONDS,start_DIS);
+FSM_END
 
-  /* Keep sending FLAGs for one second before proceeding with real frames */
-  FSMWAITJUMP(TIMER_AUX,ONESECOND,do_DIS);
-}
+FSM_STATE(NEEDS_none,start_DIS)
+	/* When we hook up the HDLC+V.21 they go online and send FLAGs */
+	ifax_connect(fax->modulatorV21,fax->rateconv7k2to8k0);
+	ifax_connect(fax->encoderHDLC,fax->modulatorV21);
 
-STATE(do_DIS)
-{
-  /* After one second of FLAGs, we transmit the DIS (and optional frames) */
+	/* Keep sending FLAGs for one second before proceeding with frames */
+	FSMWAITJUMP(TIMER_AUX,ONESECOND,do_DIS);
+FSM_END
 
-  if ( fax->NSFsize ) {
-    /* There is a NSF */
-    ifax_command(fax->encoderHDLC,CMD_HDLC_FRAMING_TXFRAME,
-		 fax->NSF,fax->NSFsize,255);
-  }
+FSM_STATE(NEEDS_none,do_DIS)
+	/* After one second of FLAGs, we transmit the DIS etc. */
 
-  if ( fax->CSIsize ) {
-    /* There is a CSI */
-    ifax_command(fax->encoderHDLC,CMD_HDLC_FRAMING_TXFRAME,
-		 fax->CSI,fax->CSIsize,255);
-  }
+	if ( fax->NSFsize ) {
+		/* There is a NSF */
+		ifax_command(fax->encoderHDLC,CMD_HDLC_FRAMING_TXFRAME,
+			     fax->NSF,fax->NSFsize,255);
+	}
 
-  /* Assume there is a DIS (it better...) */
-  ifax_command(fax->encoderHDLC,CMD_HDLC_FRAMING_TXFRAME,
-	       fax->DIS,fax->DISsize,255);
+	if ( fax->CSIsize ) {
+		/* There is a CSI */
+		ifax_command(fax->encoderHDLC,CMD_HDLC_FRAMING_TXFRAME,
+			     fax->CSI,fax->CSIsize,255);
+	}
 
-  FSMJUMP(done_DIS);
-}
+	/* Assume there is a DIS (it better...) */
+	ifax_command(fax->encoderHDLC,CMD_HDLC_FRAMING_TXFRAME,
+		     fax->DIS,fax->DISsize,255);
 
-STATE(done_DIS)
-{
-  /* Wait until the HDLC-frames has been transmitted before receiving */
-  if ( ifax_command(fax->encoderHDLC,CMD_HDLC_FRAMING_IDLE) > 2 ) {
-    ifax_connect(fax->silence,fax->rateconv7k2to8k0);
-    FSMJUMP(hunt_for_DCS_or_DTC);
-  }
-}
+	FSMJUMP(done_DIS);
+FSM_END
 
-STATE(hunt_for_DCS_or_DTC)
-{
-  /* Stay online a little to flush buffers, then exit */
-  FSMWAITJUMP(TIMER_AUX,ONESECOND,do_hard_exit);
-}
+FSM_STATE(NEEDS_none,done_DIS)
+	/* Wait until the HDLC-frames has been transmitted before receiving */
+	if ( ifax_command(fax->encoderHDLC,CMD_HDLC_FRAMING_IDLE) > 2 ) {
+		ifax_connect(fax->silence,fax->rateconv7k2to8k0);
+		FSMJUMP(hunt_for_DCS_or_DTC);
+	}
+FSM_END
+
+FSM_STATE(NEEDS_none,hunt_for_DCS_or_DTC)
+	/* Stay online a little to flush buffers, then exit */
+	FSMWAITJUMP(TIMER_AUX,ONESECOND,do_hard_exit);
+FSM_END
 
 
 /**********************************************************************
@@ -182,17 +179,15 @@ STATE(hunt_for_DCS_or_DTC)
  * as well.
  */
 
-GLOBALSTATE(fsm_wait_softsignal)
-{
-  if ( softsignaled_clr(fsmself->arg) ) {
-    FSMRETURN;
-  }
-}
+FSM_GLOBAL_STATE(NEEDS_none,fsm_wait_softsignal)
+	if ( softsignaled_clr(FSMGETARG) ) {
+		FSMRETURN(0);
+	}
+FSM_END
 
-GLOBALSTATE(do_hard_exit)
-{
-  exit(17);
-}
+FSM_GLOBAL_STATE(NEEDS_none,do_hard_exit)
+	exit(17);
+FSM_END
 
 #if 0
 
@@ -226,14 +221,14 @@ void fax_initialize_fsm_outgoing()
 
 }
 
-STATE (start_sending_fax)
+FSM_STATE (start_sending_fax)
 { 
   one_shot_timer(TIMER_DIAL, THIRTYFIVESECONDS);
   one_shot_timer(TIMER_AUX, THREESECONDS);
   fsmself->state = A_CNG_sound;
 }
 
-STATE (A_CNG_silence)
+FSM_STATE (A_CNG_silence)
 {
   if ( softsignaled(TIMER_AUX) ) {
     ifax_connect(fax->sinusCNG,fax->rateconv7k2to8k0);
@@ -252,7 +247,7 @@ STATE (A_CNG_silence)
   }
 }
 
-STATE (A_CNG_sound)
+FSM_STATE (A_CNG_sound)
 {
   if ( softsignaled(TIMER_AUX) ) {
     ifax_connect(fax->silence,fax->rateconv7k2to8k0);
@@ -271,7 +266,7 @@ STATE (A_CNG_sound)
   }
 }
 
-//#if 0
+
 /****************************************************************************
  *
  *  Phase B, FIGURE 5-2a/T.30
@@ -283,11 +278,11 @@ DEFSTATE(B_CNG_sound)
 DEFSTATE(B_CNG_silence)
 
 
-STATE (entry_PhaseB) {
+FSM_STATE (entry_PhaseB) {
   one_shot_timer(TIMER_T1, T1_TIME);  
 }
 
-STATE (B_CNG_silence)
+FSM_STATE (B_CNG_silence)
 {
   if ( softsignaled(TIMER_AUX) ) {
     ifax_connect(fax->sinusCNG,fax->rateconv7k2to8k0);
@@ -306,7 +301,7 @@ STATE (B_CNG_silence)
   }
 }
 
-STATE (B_CNG_sound)
+FSM_STATE (B_CNG_sound)
 {
   if ( softsignaled(TIMER_AUX) ) {
     ifax_connect(fax->silence,fax->rateconv7k2to8k0);
@@ -339,7 +334,7 @@ STATE (B_CNG_sound)
 DEFSTATE (Entry_B)
 
 
-STATE(Entry_B)
+FSM_STATE(NEEDS_none,Entry_B)
 {
   softsignal(ACTION_HANGUP);
   return_from_subroutine(fax);
@@ -367,13 +362,13 @@ DEFSTATE(response_received_sg2_helper)
 DEFSTATE(response_received_tdcn)
 DEFSTATE(response_received_disconnect)
 
-STATE(response_received)
+FSM_STATE(NEEDS_none,response_received)
 {
   one_shot_timer(TIMER_T4,THREESECONDS);
   fsmself->state = response_received_flag;
 }
 
-STATE(response_received_flag)
+FSM_STATE(NEEDS_none,response_received_flag)
 {
   if ( softsignaled_clr(HDLCFLAGDETECTED) ) {
     one_shot_timer(TIMER_SHUTUP,THREESECONDS);
@@ -385,7 +380,7 @@ STATE(response_received_flag)
   }
 }
 
-STATE(response_received_raf)
+FSM_STATE(NEEDS_none,response_received_raf)
 {
   if ( softsignaled_clr(HDLCFRAMERECEIVED) ) {
 
@@ -425,7 +420,7 @@ STATE(response_received_raf)
   fsmself->state = response_received_sg1;
 }
 
-STATE(response_received_sg1)
+FSM_STATE(NEEDS_none,response_received_sg1)
 {
   if ( softsignaled(V21CARRIEROK ) ) {
     fsmself->state = response_received_raf;
@@ -438,7 +433,7 @@ STATE(response_received_sg1)
   }
 }
 
-STATE(response_received_sg2)
+FSM_STATE(NEEDS_none,response_received_sg2)
 {
   if ( softfignaled(V21CARRIEROK) ) {
     if ( softsignaled(TIMER_SHUTUP) )
@@ -450,7 +445,7 @@ STATE(response_received_sg2)
   fsmself->state = response_received_sg2_helper;
 }
 
-STATE(response_received_sg2_helper)
+FSM_STATE(NEEDS_none,response_received_sg2_helper)
 {
   if ( softsignaled(V21CARRIEROK) ) {
     fsmself->state = response_received_sg2;
@@ -463,13 +458,13 @@ STATE(response_received_sg2_helper)
   }
 }
 
-STATE(response_received_tdcn)
+FSM_STATE(NEEDS_none,response_received_tdcn)
 {
   /* Transmit a disconnect line command */
   fsmself->state = response_received_disconnect;
 }
 
-STATE(response_received_disconnect)
+FSM_STATE(NEEDS_none,response_received_disconnect)
 {
   softsignal(ACTION_HANGUP);
   return_from_subroutine(fax);
@@ -499,11 +494,11 @@ DEFSTATE(command_received_sg2_helper)
 DEFSTATE(command_received_disconnect)
 
 
-STATE (command_received){
+FSM_STATE (command_received){
   fsmself->state = command_received_flag;
 }
 
-STATE (command_received_flag)
+FSM_STATE (command_received_flag)
 {
   if ( softsignaled_clr(HDLCFLAGDETECTED) ) {
     one_shot_timer(TIMER_T2,SIXSECONDS); ?????
@@ -516,7 +511,7 @@ STATE (command_received_flag)
 }
 
 
-STATE (command_received_raf) {
+FSM_STATE (command_received_raf) {
 
   if ( softsignaled_clr(HDLCFRAMERECEIVED) ) {
 
@@ -554,7 +549,7 @@ STATE (command_received_raf) {
    * transmission) or a runaway remote fax that keeps sending.
    */
 
-STATE(command_received_sg1) {
+FSM_STATE(NEEDS_none,command_received_sg1) {
 
   if ( softsignaled(V21CARRIEROK) ) {
     if ( softsignaled(TIMER_AUX)  ) {  // 0.2 seconds
@@ -574,7 +569,7 @@ STATE(command_received_sg1) {
 }
 
 
-STATE(command_received_sg2) {
+FSM_STATE(NEEDS_none,command_received_sg2) {
 
   if ( softsignaled(V21CARRIEROK) ) {
     if ( softsignaled(TIMER_AUX) ) {  // 0.2 seconds
@@ -592,7 +587,7 @@ STATE(command_received_sg2) {
 
 
 
-STATE(command_received_disconnect)
+FSM_STATE(NEEDS_none,command_received_disconnect)
 {
   softsignal(ACTION_HANGUP);
   return_from_subroutine(fax);

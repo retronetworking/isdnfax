@@ -62,7 +62,7 @@ typedef struct {
  */
 void	decode_serial_destroy(ifax_modp self)
 {
-	decode_serial_private *priv=(decode_serial_private *)self->private;
+	/* decode_serial_private *priv=(decode_serial_private *)self->private; */
 
 	free(self->private);
 
@@ -90,7 +90,7 @@ int	decode_serial_handle(ifax_modp self, void *data, size_t length)
 		currconf=*dat++;
 		priv->sampcount++;
 		
-//		printf("%d,%d\n",currbit,currconf);
+		/* printf("%d,%d\n",currbit,currconf); */
 
 		if (currconf<10) continue;
 		
@@ -120,8 +120,8 @@ int	decode_serial_handle(ifax_modp self, void *data, size_t length)
 					result|=priv->lastbits[x+1]<<x;
 					parity^=priv->lastbits[x+1];
 				}
-//				for (x=0;x<priv->bitnum;x++)
-//					printf("%d%s",priv->lastbits[x], (x==0 || x==8) ? " " : "");
+				/* for (x=0;x<priv->bitnum;x++)
+				   printf("%d%s",priv->lastbits[x], (x==0 || x==8) ? " " : ""); */
 				priv->bitnum=-1;
 				switch(priv->parity) {
 					case PAR_NONE: parity=0;break;
@@ -131,7 +131,7 @@ int	decode_serial_handle(ifax_modp self, void *data, size_t length)
 					case PAR_ZERO: parity=(0!=priv->lastbits[8]);break;
 				}
 				hlpres=result;
-//				printf(" %c\n",result);
+				/* printf(" %c\n",result); */
 				if (parity==0 && self->sendto) 
 					ifax_handle_input(self->sendto,&hlpres,1);
 			}

@@ -126,9 +126,14 @@ int ifax_command(struct ifax_module *self, int command, ...)
 /* Make a connection in a chain of signal-processing modules and update
  * both forward and backward pointers.  The direction of the flow of data
  * is from the source module to the destination module.
+ * Can be used with a zero-option to terminate a signal chain (for those
+ * modules that can handle being first or last in a chain).
  */
 void ifax_connect(struct ifax_module *src, struct ifax_module *dst)
 {
-	src->sendto = dst;
-	dst->recvfrom = src;
+	if ( src != 0 )
+		src->sendto = dst;
+
+	if ( dst != 0 )
+		dst->recvfrom = src;
 }

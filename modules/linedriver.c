@@ -1,5 +1,5 @@
 /* $Id$
-   ******************************************************************************
+******************************************************************************
 
    Fax program for ISDN.
    Line driver interface for ISDN/soundcard and timing/sequencing control.
@@ -23,17 +23,19 @@
    IN AN ACTION OF CONTRACT, TORT OR OTHERWISE, ARISING FROM, OUT OF OR IN
    CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN THE SOFTWARE.
 
-   ******************************************************************************
- */
+******************************************************************************
+*/
 
 /* NOTE: This code deals with timing-critical device-driver
  *       buffering with synchronized read/write on same
  *       device and between devices (ISDN/Audio).
  *       The relationships between buffer-sizes, read/write
  *       strategy and possible timing glitches should be
- *       investigated more closely.
+ *       investigated more closely. UPDATE: Should work well
+ *       as long as (low-level) transmit-buffer is
+ *       pre-charged to avoid draining.
  *
- * BUGS: Support for ISDN line-driving is not implemented yet.
+ * BUGS: Error sitations are not handeled well (a simple exit is done)
  */
 
 /* Maintain buffers and send/receive samples to the underlying
@@ -49,6 +51,9 @@
  *    Commands supported:
  *       CMD_LINEDRIVER_WORK
  *       CMD_LINEDRIVER_AUDIO
+ *       CMD_LINEDRIVER_FILE
+ *       CMD_LINEDRIVER_CLOSE
+ *       CMD_LINEDRIVER_ISDN,ih
  *
  *    Parameters:
  *       None
@@ -74,22 +79,22 @@
 
 #include <ifax/ifax.h>
 #include <ifax/types.h>
+#include <ifax/misc/malloc.h>
+#include <ifax/misc/isdnline.h>
 #include <ifax/modules/linedriver.h>
 
 /* These defines should probably be run-time configurable.
-
- *   BUFFERSIZE is the size of the two main input/output buffers
- *   holding all the samples we may get from the line or from the
- *   modulators.  It must be large enough to hold all samples that
- *   may arrive in one signal-chain computation.
+ *   BUFFERSIZE is the size of the main output buffer which is
+ *   filled by the handle function (incomming signal-chain).
+ *   We need a buffer here since the signaling-chain may generate
+ *   a few more samples than actually requested.
  *
- *   ATOMICSAMPLES is the number of samples we transmit/receive
+ *   MAXIOSIZE is the maximum number of samples we can transmit/receive
  *   before we call the signal chains to fill/drain the buffers.
- *   The smaller this value, the shorter delay (but less efficient).
  */
 
-#define BUFFERSIZE      256
-#define ATOMICSAMPLES    16
+#define BUFFERSIZE      512
+#define MAXIOSIZE       256
 
    typedef struct dummy
    {				/* header for *.WAV-Files         */
@@ -117,20 +122,21 @@
    typedef struct
    {
    
-      int isdn_fd, dsp_fd;
+      int dsp_fd;
       FILE *file_fd;
+      struct IsdnHandle *ih;
       ifax_sint32 dsp_rx_volume, dsp_tx_volume;
       
-      ifax_sint16 tx_buffer[ATOMICSAMPLES];
-      ifax_sint16 rx_buffer[ATOMICSAMPLES];
-      ifax_sint16 dsp_buffer[2 * ATOMICSAMPLES];
+      ifax_sint16 tx_buffer[MAXIOSIZE];
+      ifax_sint16 rx_buffer[MAXIOSIZE];
+      ifax_sint16 dsp_buffer[2 * MAXIOSIZE];
       
       struct queue
       {
          int wp, rp, size;
          ifax_sint16 buffer[BUFFERSIZE];
       }
-      input, output;
+      output;
       
       wav_header wh;
    
@@ -177,77 +183,97 @@
    static int
    work (ifax_modp self)
    {
-      int wanted, t;
+      int wanted, chunk, total, more, t;
       ifax_sint32 sp;
       ifax_uint32 up;
       linedriver_private *priv = self->private;
       short p;
       int tmp;
-   
-   /* Fill output queue by demanding data */
-      while (priv->output.size < ATOMICSAMPLES)
-      {
-         wanted = ATOMICSAMPLES - priv->output.size + 5;
-      /* printf("Want: %d\n",wanted); */
-         ifax_handle_demand (self->recvfrom, wanted);
-      }
-   
-   /* Prepare TX-buffer */
-      priv->output.size -= ATOMICSAMPLES;
-      for (t = 0; t < ATOMICSAMPLES; t++)
-      {
-         priv->tx_buffer[t] = priv->output.buffer[priv->output.rp++];
-         if (priv->output.rp >= BUFFERSIZE)
-            priv->output.rp = 0;
-      }
-   
-      if (priv->isdn_fd >= 0)
-      {
-      /* ISDN is online, send TX-buffer, receive into RX-buffer */
-      }
-      else
-      {
-         for (t = 0; t < ATOMICSAMPLES; t++)
-         {
+
+      /* When driving the ISDN-line, this is how it works:
+       * Read as much as we can from the line, and then
+       * transmit *exactly* as much.  This will keep the
+       * flow of samples smooth.  It may be a very good idea
+       * to pre-charge the output-buffers somewhat to be more
+       * resistant to buffer-drains during heavy computations.
+       */
+
+      total = more = 0;
+
+      do {
+
+	chunk = MAXIOSIZE;      /* Default buffer-size of IO-operations */
+
+	if ( priv->ih != 0 ) {
+	  /* ISDN is online, read first, then transmit */
+	  chunk = IsdnReadSamples(priv->ih,&priv->rx_buffer[0],MAXIOSIZE);
+	  if ( chunk < 0 )
+	    return -1;
+	  more = chunk == MAXIOSIZE;
+	} else
+	  for ( t=0; t < chunk; t++)
             priv->rx_buffer[t] = 0;
-         }
-      }
+
+	/* Fill output queue by demanding data (if needed) */
+	while ( priv->output.size < chunk ) {
+	  wanted = chunk - priv->output.size + 5;
+	  ifax_handle_demand (self->recvfrom, wanted);
+	}
    
-      if (priv->dsp_fd >= 0)
-      {
-      /* Soundcard audio monitoring enabled */
-         for (t = 0; t < ATOMICSAMPLES; t++)
-         {
+	/* Prepare TX-buffer */
+	priv->output.size -= chunk;
+	for (t = 0; t < chunk; t++) {
+	  priv->tx_buffer[t] = priv->output.buffer[priv->output.rp++];
+	  if ( priv->output.rp >= BUFFERSIZE )
+            priv->output.rp = 0;
+	}
+   
+	if ( priv->ih != 0 ) {
+	  /* ISDN is online, send TX-buffer */
+	  IsdnWriteSamples(priv->ih,&priv->tx_buffer[0],chunk);
+	}
+   
+	if (priv->dsp_fd >= 0)
+	  {
+	    /* Soundcard audio monitoring enabled */
+	    for (t = 0; t < chunk; t++)
+	      {
+		sp = priv->tx_buffer[t] * priv->dsp_tx_volume;
+		up = sp;
+		up >>= 16;
+		priv->dsp_buffer[2 * t + 0] = up;
          
-            sp = priv->tx_buffer[t] * priv->dsp_tx_volume;
-            up = sp;
-            up >>= 16;
-            priv->dsp_buffer[2 * t + 0] = up;
-         
-            sp = priv->rx_buffer[t] * priv->dsp_rx_volume;
-            up = sp;
-            up >>= 16;
-            priv->dsp_buffer[2 * t + 1] = up;
-         }
+		sp = priv->rx_buffer[t] * priv->dsp_rx_volume;
+		up = sp;
+		up >>= 16;
+		priv->dsp_buffer[2 * t + 1] = up;
+	      }
       
-         write (priv->dsp_fd, priv->dsp_buffer, 4 * ATOMICSAMPLES);
-      }
-      if (priv->file_fd)
-      {
-      /* wave file monitoring enabled */
-         for (t = 0; t < ATOMICSAMPLES; t++)
-         {
-            p = (short) priv->tx_buffer[t];
-            tmp = (p*0x0D55);
-            p = tmp>>12;
-            fwrite (&p, sizeof (p), 1, priv->file_fd);
-         }
-      }
-      if (self->sendto)
-      {
-         ifax_handle_input (self->sendto, &priv->tx_buffer[0], ATOMICSAMPLES);
-      }
-      return ATOMICSAMPLES;
+	    write (priv->dsp_fd, priv->dsp_buffer, 4 * chunk);
+	  }
+
+	if (priv->file_fd)
+	  {
+	    /* wave file monitoring enabled */
+	    for (t = 0; t < chunk; t++)
+	      {
+		p = (short) priv->tx_buffer[t];
+		tmp = (p*0x0D55);
+		p = tmp>>12;
+		fwrite (&p, sizeof (p), 1, priv->file_fd);
+	      }
+	  }
+
+	if ( self->sendto != 0 ) {
+	  /* Feed the receiver signaling-chain */
+	  ifax_handle_input(self->sendto, &priv->tx_buffer[0], chunk);
+	}
+
+	total += chunk;
+
+      } while ( !more );
+
+      return total;
    }
 
 
@@ -285,7 +311,7 @@
    
       dspfd = open ("/dev/dsp", O_WRONLY);
       err |= ioctl (dspfd, SNDCTL_DSP_GETBLKSIZE, &bufsize);
-      if (bufsize < ATOMICSAMPLES)
+      if (bufsize < MAXIOSIZE)
          exit (54);
       err |= ioctl (dspfd, SNDCTL_DSP_SPEED, &rate);
       err |= ioctl (dspfd, SNDCTL_DSP_STEREO, &stereo);
@@ -365,6 +391,10 @@
          case CMD_LINEDRIVER_CLOSE:
             linedriver_destroy (self);
             break;
+
+         case CMD_LINEDRIVER_ISDN:
+	   priv->ih = va_arg(cmds,struct IsdnHandle *);
+	   break;
       
          default:
             return 1;
@@ -378,22 +408,18 @@
    {
       linedriver_private *priv;
    
-      if ((priv = self->private = malloc (sizeof (linedriver_private))) == 0)
-         return 1;
+      priv = ifax_malloc(sizeof(linedriver_private),"Linedriver instance");
+      self->private = priv;
    
       self->destroy = linedriver_destroy;
       self->handle_input = linedriver_handle;
       self->command = linedriver_command;
    
-      priv->input.wp = 0;
-      priv->input.rp = 0;
-      priv->input.size = 0;
-   
       priv->output.wp = 0;
       priv->output.rp = 0;
       priv->output.size = 0;
    
-      priv->isdn_fd = -1;
+      priv->ih = 0;
       priv->dsp_fd = -1;
       priv->dsp_rx_volume = 0x8000;
       priv->dsp_tx_volume = 0x6000;

@@ -185,11 +185,8 @@ int rateconvert_construct(ifax_modp self, va_list args )
 
   /* Find size of subfilter, and fail if not proper */
   priv->subfiltsize = priv->filtersize / priv->upfactor;
-  if ( (priv->subfiltsize * priv->upfactor) != priv->filtersize ) {
-    printf("Filter-size %d incompatible with upsampe %d\n",
-	    priv->filtersize,priv->upfactor);
+  if ( (priv->subfiltsize * priv->upfactor) != priv->filtersize )
     return 1;
-  }
 
   if ( (priv->data=malloc(sizeof(*priv->data)*priv->subfiltsize)) == 0 )
     return 1;

@@ -1,0 +1,17 @@
+TODO
+====
+
+This file is intended as a notepad for the developers of Fax for Linux.
+The project is in the early development stage, and many loose ends
+and experimental code should be expected.  [Nov 30 1998]
+
+* The module/scrambler17.c is broken.  I have a perl-script that will
+  easily generate the correct tables when this is needed. -Morten
+
+* Decide on how to handle types correctly for the more low-level DSP
+  code, so that we don't run into trouble on 64-bit systems etc., and
+  modify the code accordingly.
+
+* The module/modulator-V29.c is (hopefully) logically correct,
+  but produces badly shaped signals that can't be used.
+

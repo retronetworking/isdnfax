@@ -403,11 +403,11 @@ test_v29demod (void)
 
 void test_new_v21_demod(void)
 {
-  ifax_modp v21mod, rateconvert, v21demod, sync;
+  ifax_modp v21mod, rateconvert, v21demod, sync, hdlcdecode, faxcntrl;
   ifax_modp debug;
 
   /* V.21 channel 1 modulator to make a clean signal at 7200 samples/s */
-  v21mod = ifax_create_module(IFAX_MODULATORV21,1);
+  v21mod = ifax_create_module(IFAX_MODULATORV21,2);
   assert(v21mod!=0);
 
   /* Rateconvert from 7200 Hz to 8000 Hz */
@@ -416,27 +416,51 @@ void test_new_v21_demod(void)
   assert(rateconvert!=0);
 
   /* V.21 demodulator */
-  v21demod = ifax_create_module(IFAX_FSKDEMOD,8000,980,1180,300);
+  v21demod = ifax_create_module(IFAX_FSKDEMOD,8000,1650,1850,300);
   assert(v21demod!=0);
 
   /* Syncronization circuit */
   sync = ifax_create_module(IFAX_SYNCBIT,8000,300);
   assert(sync!=0);
 
+  /* HDLC-decoder */
+  hdlcdecode = ifax_create_module (IFAX_DECODE_HDLC);
+  assert(hdlcdecode!=0);
+
+  /* Decode fax-messages */
+  faxcntrl = ifax_create_module (IFAX_FAXCONTROL);
+  assert(faxcntrl!=0);
+
   /* Debug result ... */
-  debug = ifax_create_module(IFAX_DEBUG, 0, DEBUG_FORMAT_CONFIDENCE,
+  debug = ifax_create_module(IFAX_DEBUG, 0, DEBUG_FORMAT_PACKED_BINARY,
 			     DEBUG_METHOD_STDOUT);
   assert(debug!=0);
 
   /* Line up */
   ifax_connect((ifax_modp)0,v21mod);
-  ifax_connect(v21mod,rateconvert);
-  ifax_connect(rateconvert,v21demod);
-  /* ifax_connect(v21demod,sync); */
-  ifax_connect(v21demod,debug);
-  ifax_connect(debug,(ifax_modp)0);
+  /* ifax_connect(v21mod,rateconvert); */
+  ifax_connect(v21mod,v21demod);
+  ifax_connect(v21demod,sync);
+  ifax_connect(sync,hdlcdecode);
+  ifax_connect(sync,debug);
+  ifax_connect(hdlcdecode,faxcntrl);
 
-  ifax_handle_input(v21mod,"\0\0\0\0\0\0\0\0",64);
+  {
+    FILE *fp;
+    ifax_sint16 samples[2];
+
+    if ( (fp=fopen("/tmp/modem.dat","r")) == 0 ) {
+      fprintf(stderr,"Can't open /tmp/modem.dat\n");
+      exit(1);
+    }
+
+    while ( fread(&samples[0],4,1,fp) == 1 ) {
+      samples[1] *= 30;    /* Patch; logged signal is too weak */
+      ifax_handle_input(v21demod,&samples[0],1);
+    }
+
+    fclose(fp);
+  }
 }
 
 

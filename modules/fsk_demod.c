@@ -151,7 +151,7 @@ static void init_four_help(fskdemod_private *priv,four_help *hlp,int depth,int f
 	{
 		sinval=sin(x*2.0*M_PI*(double)freq/(double)priv->sps);
 		for(y=0;y<256;y++)
-			*ftptr++=((int)(sinval*alaw2int(y))) >> 
+			*ftptr++=((int)(sinval*532610.0*wala2sint[y])) >> 
 				 ((sizeof(int)-sizeof(char))*8);
 	}
 }

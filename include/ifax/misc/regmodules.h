@@ -53,5 +53,6 @@ extern ifax_module_id IFAX_FAXCONTROL;
 extern ifax_module_id IFAX_LINEDRIVER;
 extern ifax_module_id IFAX_SIGNALGEN;
 extern ifax_module_id IFAX_V29DEMOD;
+extern ifax_module_id IFAX_ENCODER_HDLC;
 
 extern void register_modules(void);

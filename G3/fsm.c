@@ -71,6 +71,7 @@
  */
 
 DEFGLOBALSTATE(fsm_wait_softsignal)
+DEFGLOBALSTATE(do_hard_exit)
 
 
 /* List states here that is called in a forward fashion (most of them) */
@@ -166,9 +167,9 @@ STATE(done_DIS)
 
 STATE(hunt_for_DCS_or_DTC)
 {
-  ifax_connect(fax->silence,fax->rateconv7k2to8k0);
+  /* Stay online a little to flush buffers, then exit */
+  FSMWAITJUMP(TIMER_AUX,ONESECOND,do_hard_exit);
 }
-
 
 
 /**********************************************************************
@@ -188,6 +189,10 @@ GLOBALSTATE(fsm_wait_softsignal)
   }
 }
 
+GLOBALSTATE(do_hard_exit)
+{
+  exit(17);
+}
 
 #if 0
 

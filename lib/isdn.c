@@ -28,7 +28,11 @@ int IsdnOpenDevice(char *device)
 	int isdnfd;
 	struct termios isdnsetting;
 
+#if 1
 	if ( (isdnfd=open(device,O_RDWR)) < 0 ) {
+#else	// Fritz Elfert does here:
+	if ( (isdnfd=open(device,O_RDWR|O_NDELAY)) < 0 ) {
+#endif
 		sprintf(isdnerr,"Unable to open '%s'",device);
 		return -1;
 	}

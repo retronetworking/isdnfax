@@ -94,7 +94,7 @@ static void test_v21(enum MODEM_MODE direction)
 
 	/* helper for data in-/output
 	 */
-	char data;
+	unsigned char data;
 
 	/* helper to avoid overflowing the send buffer.
 	 */
@@ -163,6 +163,24 @@ static void test_v21(enum MODEM_MODE direction)
 	}
 	fskd->sendto=deserial;
 
+	/* The first 2 seconds are silence to allow for finding the
+	 * noise level.
+	 * No output is made until the "wait" variable is down to zero.
+	 */
+	wait=4*SAMPLES_PER_SECOND;	/* 2s steady carrier ! */
+
+	while(wait--)
+	{
+		/* Read data from isdn4linux.
+		 */
+		IsdnReadAudio(isdnhandle,&data,1);
+
+		/* Send back a steady 0
+		 */
+		data=int2alaw(0);
+		IsdnSendAudio(isdnhandle,&data,1);
+	}
+
 	/* The first two seconds are reserved to send a steady carrier.
 	 * No output is made until the "wait" variable is down to zero.
 	 */
@@ -218,6 +236,11 @@ void setup_isdn(char *sourcemsn)
 {
 	char cmdbuffer[128];
 
+	/* Reset the modem
+	 */
+	sprintf(cmdbuffer,"ATZ");
+	IsdnCommand(isdnhandle,cmdbuffer,1,1);
+
 	/* Set up the MSN.
 	 */
 	sprintf(cmdbuffer,"AT&E%s",sourcemsn);
@@ -227,13 +250,21 @@ void setup_isdn(char *sourcemsn)
 	 */
 	IsdnCommand(isdnhandle,"AT+FCLASS=8",1,1);
 
+	/* Set the data format to aLaw.
+	 */
+	IsdnCommand(isdnhandle,"AT+VSM=5",1,1);
+
 	/* Set the service identifier to "audio".
 	 */
 	IsdnCommand(isdnhandle,"ATS18=1",1,1);	/* service == audio */
 
+	/* Set layer 2 to "audio".
+	 */
+	IsdnCommand(isdnhandle,"ATS14=4",1,1);	/* layer 2 == audio */
+
 	/* Set the data format to aLaw, and the device to "phone-line".
 	 */
-	IsdnCommand(isdnhandle,"AT+VSM=5+VLS=2",1,1);
+//	IsdnCommand(isdnhandle,"AT+VSM=5+VLS=2",1,1);
 }
 
 /* A function that more or less implements the "ATDxxx" function of a modem.
@@ -249,7 +280,7 @@ void dial_isdn(char *number)
 
 	/* Set up the packet size.
 	 */
-	IsdnCommand(isdnhandle,"ATS16=48",1,1);	/* Sendpacketsize/16 WHY ??? */
+//	IsdnCommand(isdnhandle,"ATS16=48",1,1);	/* Sendpacketsize/16 WHY ??? */
 
 	/* Start full duplex audio transmission.
 	 */
@@ -260,17 +291,21 @@ void dial_isdn(char *number)
  */
 void answer_isdn(void)
 {
-	/* Set up the packet size.
-	 */
-	IsdnCommand(isdnhandle,"ATS16=48",1,1);	/* Sendpacketsize/16 WHY ??? */
+//	/* Set up the packet size.
+//	 */
+//	IsdnCommand(isdnhandle,"ATS16=48",1,1);	/* Sendpacketsize/16 WHY ??? */
 
 	/* Answer the pending call - hope there is one ...
 	 */
 	IsdnCommand(isdnhandle,"ATA",1,1);
 
-//	/* Start full duplex audio transmission.
+//	/* Set the data format to aLaw, and the device to "phone-line".
 //	 */
-//	IsdnCommand(isdnhandle,"AT+VTX+VRX",1,0);
+//	IsdnCommand(isdnhandle,"AT+VSM=5+VLS=2",1,1);
+
+	/* Start full duplex audio transmission.
+	 */
+	IsdnCommand(isdnhandle,"AT+VTX+VRX",1,0);
 }
 
 /* Print out how to use this program.
@@ -353,7 +388,7 @@ void main(int argc,char **argv)
 		{
 			char buffer[256];
 			IsdnReadLine(isdnhandle,buffer,sizeof(buffer));
-			printf("Readline:%s",buffer);
+			printf("Readline:%s\n",buffer);
 			if (strncmp(buffer,"RING",4)==0) break;
 		}
 		answer_isdn();

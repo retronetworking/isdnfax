@@ -40,41 +40,37 @@
 #include <stdio.h>
 #include <stdlib.h>
 #else
-extern short atantbl[];
+   extern short atantbl[];
 #endif
 
-unsigned short
-intatan (short y, short x)
-{
-  int tmp;
-  short abs_y, abs_x;
-  short res;
-
-  abs_y = (y < 0) ? -y : y;
-  abs_x = (x < 0) ? -x : x;
-
-  if (abs_y <= abs_x)
-    {
-      tmp = abs_y << 15;
-      res = atantbl[tmp / abs_x];
-    }
-  else
-    {
-      tmp = abs_x << 15;
-      res = DEG90 - atantbl[tmp / abs_y];
-    }
-
-  if (x > 0)
-    {
-      res = (y > 0) ? res : (DEG360 - res);
-    }
-  else
-    {
-      res = (y > 0) ? (DEG180 - res) : (DEG180 + res);
-    }
-
-  return res;
-}
+   unsigned short
+   intatan (short y, short x)
+   {
+      int tmp;
+      short abs_y, abs_x;
+      short res;
+   
+      abs_y = (y < 0) ? -y : y;
+      abs_x = (x < 0) ? -x : x;
+   
+      if (abs_y <= abs_x){
+         tmp = abs_y << 15;
+         res = atantbl[tmp / abs_x];
+      }
+      else{
+         tmp = abs_x << 15;
+         res = DEG90 - atantbl[tmp / abs_y];
+      }
+   
+      if (x > 0){
+         res = (y > 0) ? res : (DEG360 - res);
+      }
+      else{
+         res = (y > 0) ? (DEG180 - res) : (DEG180 + res);
+      }
+   
+      return res;
+   }
 
 
 

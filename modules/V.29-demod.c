@@ -39,6 +39,20 @@
 #define 		INTERVAL_CNT		2
 
 
+#define		X1						0x1555
+#define		X2						0x2AAA
+#define		X3						0x4000
+#define		X4						0x5555
+#define		X5						0x6AAA
+#define		X6						0x7FFF
+#define		Y1						0x1555
+#define		Y2						0x2AAA
+#define		Y3						0x4000
+#define		Y4						0x5555
+#define		Y5						0x6AAA
+#define		Y6						0x7FFF
+
+
 #define		DEG0					0x0000
 #define		DEG45					0x2000
 #define		DEG90					0x4000
@@ -71,22 +85,22 @@
 
    V29_symbol V29_symb_tbl[] =
    {
-   {0x4CCC, 0x0000, DEG0},					/* P=000 Q=0  (0)   */
-   {0x7FFF, 0x0000, DEG0},					/* P=000 Q=1  (0)   */
-   {0x1999, 0x1999, DEG45},				/* P=001 Q=0  (45)  */
-   {0x4CCC, 0x4CCC, DEG45},				/* P=001 Q=1  (45)  */
-   {0x0000, 0x4CCC, DEG90},				/* P=010 Q=0  (90)  */
-   {0x0000, 0x7FFF, DEG90},				/* P=010 Q=1  (90)  */
-   {0xE666, 0x1999, DEG135},				/* P=011 Q=0  (135) */
-   {0xB333, 0x4CCC, DEG135},				/* P=011 Q=1  (135) */
-   {0xB333, 0x0000, DEG180},				/* P=100 Q=0  (180) */
-   {0x8000, 0x0000, DEG180},				/* P=100 Q=1  (180) */
-   {0xE666, 0xE666, DEG225},				/* P=101 Q=0  (225) */
-   {0xB333, 0xB333, DEG225},				/* P=101 Q=1  (225) */
-   {0x0000, 0xB333, DEG270},				/* P=110 Q=0  (270) */
-   {0x0000, 0x8000, DEG270},				/* P=110 Q=1  (270) */
-   {0x1999, 0xE666, DEG315},				/* P=111 Q=0  (315) */
-   {0x4CCC, 0xB333, DEG315},				/* P=111 Q=1  (315) */
+   {0x4000, 0x0000, DEG0},					/* P=000 Q=0  (0)   */
+   {0x6AAA, 0x0000, DEG0},					/* P=000 Q=1  (0)   */
+   {0x1555, 0x1555, DEG45},				/* P=001 Q=0  (45)  */
+   {0x4000, 0x4000, DEG45},				/* P=001 Q=1  (45)  */
+   {0x0000, 0x4000, DEG90},				/* P=010 Q=0  (90)  */
+   {0x0000, 0x6AAA, DEG90},				/* P=010 Q=1  (90)  */
+   {0xEAAB, 0x1555, DEG135},				/* P=011 Q=0  (135) */
+   {0xC000, 0x4000, DEG135},				/* P=011 Q=1  (135) */
+   {0xC000, 0x0000, DEG180},				/* P=100 Q=0  (180) */
+   {0x9556, 0x0000, DEG180},				/* P=100 Q=1  (180) */
+   {0xEAAB, 0xEAAB, DEG225},				/* P=101 Q=0  (225) */
+   {0xC000, 0xC000, DEG225},				/* P=101 Q=1  (225) */
+   {0x0000, 0xC000, DEG270},				/* P=110 Q=0  (270) */
+   {0x0000, 0x9556, DEG270},				/* P=110 Q=1  (270) */
+   {0x1555, 0xEAAB, DEG315},				/* P=111 Q=0  (315) */
+   {0x4000, 0xC000, DEG315},				/* P=111 Q=1  (315) */
    }; 
 
    typedef struct
@@ -111,6 +125,9 @@
    V29demod_private;
 
    short dem_lpf_coef[] = {0x203E, 0x3F82, 0x203E};
+   int FirstQuadTbl[] = {0,1,2,3,4,5,2,3};
+   int ReMinusTbl[] = {8,9,6,7,4,5};
+   int ImMinusTbl[] = {0,1,14,15,12,13,10,11,8,9};
 
 
    short DCD (short s, V29demod_private * priv);
@@ -118,6 +135,7 @@
    short FindSeq2(V29demod_private * priv);
    short PhaseHuntSeq2(V29demod_private * priv);
    short agc(short s, V29demod_private * priv);
+   short SymbolMapping(V29demod_private * priv);
 
 
    void
@@ -164,11 +182,16 @@
                break;
          
             case PHASEHUNT:				/* synchronize the carrier phase */
-            *ps_s = AGC(*ps_s, priv);
+               *ps_s = agc(*ps_s, priv);
                DCD (*ps_s, priv);
                Demod (*ps_s, priv);
-               PhaseHuntSeq2(priv);
+               if(priv->smpl_cnt == 0){
+                  PhaseHuntSeq2(priv);
+                  SymbolMapping(priv);
+                  priv->smpl_cnt = 3;
+               }
             
+               priv->smpl_cnt--;
                ps_s++;
                break;
          }
@@ -207,7 +230,8 @@
    										the demodulator buffers */
       priv->smpl_cnt = -1;		/* offset for symbol sync. 
    										-1 stands for 'no symb. found' */
-      priv->agc_gain1 = 0x1000;	/* equals 1 in (4:12) format */ 
+      priv->agc_gain1 = 0x0D55;		/* equals 0.8333 in (4:12) format */ 
+   	/*priv->agc_gain1 = 0x1000;	/* equals 1 in (4:12) format */ 
       return 0;
    }
 
@@ -272,8 +296,8 @@
             break;
       }
    
-      sum_Re = sum_Re >> 15;
-      sum_Im = sum_Im >> 15;
+      sum_Re = sum_Re >> 14;
+      sum_Im = sum_Im >> 14;
       priv->dem_re[priv->dem_index] = sum_Re;
       priv->dem_im[priv->dem_index] = sum_Im;
    
@@ -286,6 +310,51 @@
       return 0;
    }
 
+
+   short SymbolMapping(V29demod_private * priv)
+   {
+      short re = priv->dem_re[priv->dem_index];
+      short im = priv->dem_im[priv->dem_index];
+      short abs_re;
+      short abs_im;
+      short tmp;
+      int d1, d2, point;
+      int offset = 0;
+   
+      abs_re = re < 0 ? -re : re;
+      abs_im = im < 0 ? -im : im;
+   
+      if(abs_re < abs_im){
+         tmp = abs_re;
+         abs_re = abs_im;
+         abs_im = tmp;
+         offset = 4;
+      }
+   
+      if(abs_re < X4){
+         if((abs_re+abs_im) < X2+Y2){
+            d1 = (abs_re - X3)*(abs_re - X3) + abs_im*abs_im;
+            d2 = (abs_re - X1)*(abs_re - X1) + (abs_im-Y1)*(abs_im-Y1);
+            point = d1 > d2  ? 2 : 0;
+         }
+         else{
+            d1 = (abs_re - X3)*(abs_re - X3) + abs_im*abs_im;
+            d2 = (abs_re - X3)*(abs_re - X3) + (abs_im-Y3)*(abs_im-Y3);
+            point = d1 > d2 ? 3 : 0;
+         }
+      }
+      else{
+         d1 = (abs_re - X5)*(abs_re - X5) + abs_im*abs_im;
+         d2 = (abs_re - X3)*(abs_re - X3) + (abs_im-Y3)*(abs_im-Y3);
+         point = d1 > d2 ? 3 : 1;
+      } 
+   
+      point = FirstQuadTbl[offset+point];
+      if(re < 0) point = ReMinusTbl[point];
+      if(im < 0) point = ImMinusTbl[point];
+   
+      return 0;
+   }
 
    short 
    FindSeq2(V29demod_private * priv)
@@ -379,23 +448,17 @@
    PhaseHuntSeq2(V29demod_private * priv)
    {
    
-   	/* do every 3rd sample */
-      if(priv->smpl_cnt == 0){
-      
-      	/* adjust phi by the current phase difference */
-         priv->phi += 
-            priv->current_symbol.angl - 
-            priv->dem_angl[priv->dem_index];
-      
-      	/* toggle symbol */
-         if(priv->current_symbol.angl == DEG180)
-            priv->current_symbol = V29_symb_tbl[B9600];	
-         else
-            priv->current_symbol = V29_symb_tbl[A9600];
-         priv->smpl_cnt = 3;
-      }
+     	/* adjust phi by the current phase difference */
+      priv->phi += 
+         priv->current_symbol.angl - 
+         priv->dem_angl[priv->dem_index];
    
-      priv->smpl_cnt--;
+     	/* toggle symbol */
+      if(priv->current_symbol.angl == DEG180)
+         priv->current_symbol = V29_symb_tbl[B9600];	
+      else
+         priv->current_symbol = V29_symb_tbl[A9600];
+   
       return 0;
    }
 

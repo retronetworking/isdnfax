@@ -6,4 +6,5 @@
  * Copyright (C) 1998 Oliver Eichler [Oliver.Eichler@regensburg.netsurf.de]
  */
 
+
 int modulator_V29_construct(ifax_modp self, va_list args);

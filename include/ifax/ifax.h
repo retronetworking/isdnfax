@@ -22,3 +22,4 @@
 #include <ifax/int2alaw.h>
 #include <ifax/isdn.h>
 #include <ifax/g711.h>
+#include <ifax/atan.h>

@@ -177,6 +177,7 @@ int	fskdemod_handle(ifax_modp self, void *data, size_t length)
 		else       { conf=100-100*a1/a2; pwr=a2/priv->freq2.depthsquare; }
 #ifdef BIGDEBUG
 			printf(" dec: %d conf=%d pwr=%d\n", 
+			
 				a1 > a2 ? 1 : 0,
 				conf,
 				pwr );

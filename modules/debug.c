@@ -32,101 +32,104 @@
 
 #include <ifax/modules/debug.h>
 
-typedef struct {
-
-	/* How many bytes are there per "len" unit ? */
-	int bytes_per_sample;
-
-	/* See 'debug.h' for details on the formats and methods */
-	int output_format;
-	int output_method;
-
-} debug_private;
+   typedef struct {
+   
+   /* How many bytes are there per "len" unit ? */
+      int bytes_per_sample;
+      
+      /* See 'debug.h' for details on the formats and methods */
+      int output_format;
+      int output_method;
+   
+   } debug_private;
 
 /* Free the private data
  */
-void	debug_destroy(ifax_modp self)
-{
-	free(self->private);
-	return;
-}
+   void	debug_destroy(ifax_modp self)
+   {
+      free(self->private);
+      return;
+   }
 
-int	debug_command(ifax_modp self,int cmd,va_list cmds)
-{
-	return 0;	/* Not yet used. */
-}
+   int	debug_command(ifax_modp self,int cmd,va_list cmds)
+   {
+      return 0;	/* Not yet used. */
+   }
 
-int	debug_handle(ifax_modp self, void *data, size_t length)
-{
-	unsigned char *dat=data;
-	signed short *s16 = data;
-	int handled=0;
-	int x;
-	FILE *file;
-	
-	debug_private *priv=(debug_private *)self->private;
+   int	debug_handle(ifax_modp self, void *data, size_t length)
+   {
+      unsigned char *dat=data;
+      signed short *s16 = data;
+      int handled=0;
+      int x;
+      FILE *file;
+   
+      debug_private *priv=(debug_private *)self->private;
+   
+      if ( priv->bytes_per_sample ) {
+      
+         while(handled<length) {
+            for (x=0;x<priv->bytes_per_sample;x++,dat++)
+               fprintf(stderr,"%2x(%c) ",*dat,*dat);
+         
+            fprintf(stderr,"\n");
+            fflush(stderr);
+         
+            handled++;
+         }
+      } 
+      else {
+         switch ( priv->output_method ) {
+            case DEBUG_METHOD_STDOUT:
+               file = stdout;
+               break;
+            case DEBUG_METHOD_STDERR:
+               file = stderr;
+               break;
+            default:
+               fprintf(stderr,"Bad DEBUG_METHOD_*\n");
+               exit(1);
+         }
+      
+         while ( handled < length ) {
+            switch ( priv->output_format ) {
+               case DEBUG_FORMAT_SIGNED16BIT:
+                  fprintf(file,"%d\n",(signed int)(*s16++));
+                  break;
+               case DEBUG_FORMAT_16BIT_HEX:
+                  fprintf(file,"0x%04x\n",((signed int)(*s16++))&0xffff);
+                  break;
+               default:
+                  fprintf(stderr,"Bad DEBUG_FORMAT_*\n");
+                  exit(1);
+            }
+            handled++;
+         }
+      }
+   
+      if (self->sendto)
+         ifax_handle_input(self->sendto,data,length);
+   
+      return handled;
+   }
 
-	if ( priv->bytes_per_sample ) {
-
-		while(handled<length) {
-			for (x=0;x<priv->bytes_per_sample;x++,dat++)
-				fprintf(stderr,"%2x(%c) ",*dat,*dat);
-
-			fprintf(stderr,"\n");
-			fflush(stderr);
-				
-			handled++;
-		}
-	} else {
-		switch ( priv->output_method ) {
-			case DEBUG_METHOD_STDOUT:
-				file = stdout;
-				break;
-			case DEBUG_METHOD_STDERR:
-				file = stderr;
-				break;
-			default:
-				fprintf(stderr,"Bad DEBUG_METHOD_*\n");
-				exit(1);
-		}
-
-		while ( handled < length ) {
-			switch ( priv->output_format ) {
-				case DEBUG_FORMAT_SIGNED16BIT:
-					fprintf(file,"%d\n",(signed int)(*s16++));
-					break;
-				case DEBUG_FORMAT_16BIT_HEX:
-					fprintf(file,"0x%04x\n",((signed int)(*s16++))&0xffff);
-					break;
-				default:
-					fprintf(stderr,"Bad DEBUG_FORMAT_*\n");
-					exit(1);
-			}
-			handled++;
-		}
-	}
-
-	if (self->sendto)
-		ifax_handle_input(self->sendto,data,length);
-
-	return handled;
-}
-
-int	debug_construct(ifax_modp self,va_list args)
-{
-	debug_private *priv;
-	if (NULL==(priv=self->private=malloc(sizeof(debug_private)))) 
-		return 1;
-	self->destroy		=debug_destroy;
-	self->handle_input	=debug_handle;
-	self->command		=debug_command;
-
-	priv->bytes_per_sample=va_arg(args,int);
-
-	if ( priv->bytes_per_sample == 0 ) {
-	  priv->output_format = va_arg(args,int);
-	  priv->output_method = va_arg(args,int);
-	}
-
-	return 0;
-}
+   int	debug_construct(ifax_modp self,va_list args)
+   {
+      debug_private *priv;
+   	
+      if (NULL==(priv=self->private=malloc(sizeof(debug_private)))) 
+         return 1;
+   		
+      self->destroy		=debug_destroy;
+      self->handle_input	=debug_handle;
+      self->command		=debug_command;
+   
+      priv->bytes_per_sample=va_arg(args,int);
+   
+      if ( priv->bytes_per_sample == 0 ) {
+         priv->output_format = va_arg(args,int);
+         priv->output_method = va_arg(args,int);
+      }
+   
+      return 0;
+   }

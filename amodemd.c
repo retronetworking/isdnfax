@@ -57,8 +57,12 @@
 #include <ifax/G3/kernel.h>
 #include <ifax/G3/fax.h>
 
+#include <ifax/misc/pty.h>
+#include <ifax/highlevel/commandparse.h>
 
 static struct IsdnHandle *ih;
+static struct PtyHandle *ph;
+static struct ModemHandle *mh;
 
 /* Parse command-line arguments and bail out with an error message if
  * something is wrong.
@@ -66,76 +70,87 @@ static struct IsdnHandle *ih;
 
 static void usage(void)
 {
-  fprintf(stderr,"Usage: %s [-D] [-c <config-file>]\n",progname);
-  exit(1);
+	fprintf(stderr,"Usage: %s [-D] [-c <config-file>]\n",progname);
+	exit(1);
 }
 
 static void parse_arguments(int argc, char **argv)
 {
-  int t;
+	int t;
 
-  if ( argc > 0 && argv[0] != 0 ) {
-    progname = rindex(argv[0],'/');
-    if ( progname != 0 ) {
-      progname++;
-    } else {
-      progname = argv[0];
-    }
-  }
+	if ( argc > 0 && argv[0] != 0 ) {
+		progname = rindex(argv[0],'/');
+		if ( progname != 0 ) {
+			progname++;
+		} else {
+			progname = argv[0];
+		}
+	}
 
-  t = 1;
-  while ( t < argc ) {
+	t = 1;
+	while ( t < argc ) {
 
-    if ( !strcmp("-c",argv[t]) ) {
-      t++;
-      if ( t >= argc )
-	usage();
-      config_file = argv[t];
-      t++;
-    }
+		if ( !strcmp("-c",argv[t]) ) {
+			t++;
+			if ( t >= argc )
+				usage();
+			config_file = argv[t];
+			t++;
+		}
 
-    if ( !strcmp("-D",argv[t]) ) {
-      t++;
-      run_as_daemon = 1;
-    }
-  }
+		if ( !strcmp("-D",argv[t]) ) {
+			t++;
+			run_as_daemon = 1;
+		}
+	}
 }
 
-static void select_wait(void)
+static void main_loop(void)
 {
-  fd_set rfd;
-  struct timeval delay;
+	fd_set rfd, wfd;
+	int maxfd, rc;
+	struct timeval delay;
 
-  FD_ZERO(&rfd);
-  FD_SET(ih->fd,&rfd);
+	printf("Main loop....\n");
 
-  delay.tv_sec = 0;
-  delay.tv_usec = 20000;
+	for (;;) {
+		FD_ZERO(&rfd);
+		FD_ZERO(&wfd);
 
-  select(ih->fd+1, &rfd, (fd_set *)0, (fd_set *)0, &delay);
-}
+		/* Watch the ISDN-line for more incomming samples */
+		FD_SET(ih->fd,&rfd);
+		maxfd = ih->fd + 1;
 
-static void setup_incomming(void)
-{
-  reset_timers();
-  reset_softsignals();
-  fax_prepare_incomming(fax);
-}
+		/* Watch the pty for incomming AT-commands or data */
+		pty_prepare_select(ph,&maxfd,&rfd,&wfd);
 
-static void handle_call(void)
-{
-  int samples;
+		delay.tv_sec = 0;
+		delay.tv_usec = 500000;
 
-  for (;;) {
-#ifndef TESTING
-    select_wait();
+		/* Do the actual waiting (sleeping).  When this select
+		 * system call is made, the rest of the system can run when
+		 * using the real-time scheduler.
+		 */
+		rc = select(maxfd, &rfd, (fd_set *)0, (fd_set *)0, &delay);
+
+		pty_service_read(ph);
+
+		rc = IsdnService(ih);
+		if ( rc == ISDN_RINGING ) {
+			pty_write(ph,"\nRING\n\n",7);
+#if 0
+			/* Not gotten far enough for testing this yet... */
+			if ( IsdnAnswer(ih) ) {
+				setup_incomming();
+				handle_call();
+			}
 #endif
-    samples = ifax_command(linedriver,CMD_LINEDRIVER_WORK);
-    if ( samples < 0 )
-      break;
-    decrease_timers(samples);
-    fax_run_internals();       /* runs the state machine(s) */
-  }
+		}
+
+		modeminput(mh,ph);
+
+		pty_service_write(ph);
+	}
 }
 
 
@@ -143,56 +158,39 @@ static void handle_call(void)
 
 void main(int argc, char **argv)
 {
-  int x;
+	parse_arguments(argc,argv);
+	read_configuration_file();
 
-  parse_arguments(argc,argv);
-  read_configuration_file();
+	if ( run_as_daemon )
+		start_daemon();
 
-  if ( run_as_daemon )
-    start_daemon();
+	if ( watchdog_timeout > 0 ) {
+		initialize_watchdog_timer();
+		reset_watchdog_timer();
+	}
 
-  if ( watchdog_timeout > 0 ) {
-    initialize_watchdog_timer();
-    reset_watchdog_timer();
-  }
+	register_modules();
 
-  register_modules();
+	/* Start slave I/O and interface process here when available... */
 
-  /* Start slave I/O and interface process here when available... */
+	ph = pty_initialize("/dev/ptyp9");
+	mh = modem_initialize();
+	ih = IsdnInit(isdn_device,isdn_msn);
 
-  ih = IsdnInit(isdn_device,isdn_msn);
+	linedriver = ifax_create_module(IFAX_LINEDRIVER);
+	ifax_command(linedriver,CMD_LINEDRIVER_ISDN,ih);
+	/* ifax_command(linedriver,CMD_LINEDRIVER_AUDIO); */
+	/* ifax_command(linedriver,CMD_LINEDRIVER_RECORD,"modem.dat"); */
 
-  linedriver = ifax_create_module(IFAX_LINEDRIVER);
-#ifndef TESTING
-  ifax_command(linedriver,CMD_LINEDRIVER_ISDN,ih);
-#endif
-  /* ifax_command(linedriver,CMD_LINEDRIVER_AUDIO); */
-  ifax_command(linedriver,CMD_LINEDRIVER_RECORD,"modem.dat");
+	initialize_G3fax(linedriver);
 
-  initialize_G3fax(linedriver);
+	initialize_realtime();
 
-#ifdef TESTING
-  setup_incomming();
-  handle_call();
-  exit(0);
-#endif
+	main_loop();
 
-  initialize_realtime();
+	/* Should never get here */
+	ifax_command(linedriver,CMD_LINEDRIVER_RECORD,(char *)0);
+	check_stack_usage();
 
-  while ( ! ih->error ) {
-    /* ISDN-line ok, do work */
-    select_wait();
-    x = IsdnService(ih);
-    if ( x == ISDN_RINGING ) {
-      if ( IsdnAnswer(ih) ) {
-	setup_incomming();
-	handle_call();
-      }
-    }
-  }
-
-  ifax_command(linedriver,CMD_LINEDRIVER_RECORD,(char *)0);
-  check_stack_usage();
-
-  exit(0);
+	exit(0);
 }

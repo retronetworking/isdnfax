@@ -1,9 +1,10 @@
 LDFLAGS=-lm
 CFLAGS=-O2 -g -Wall -pedantic -Iinclude
 
-SUBDIRS = lib misc modules G3
+SUBDIRS = lib misc modules G3 highlevel
 
-MODULES = misc/misc.a modules/modules.a G3/g3.a lib/isdnlib.a
+MODULES = misc/misc.a modules/modules.a G3/g3.a lib/isdnlib.a \
+	highlevel/highlevel.a
 
 PROGRAMS = v21_softmodem amodemd #test
 
@@ -38,11 +39,10 @@ dist:
 	find . -name CVS -type d -exec rm -rf {} \; -prune;		\
 	find . -name .cvsignore -exec rm {} \; ;			\
 	find . -name \*~ -exec rm {} \;	;				\
-	find . -name \#\*\# -exec rm {} ;				\
+	find . -name \#\*\# -print ;					\
 	find . -name \*.o -exec rm {} \; ;				\
 	find . -name \*.a -exec rm {} \; ;				\
-	rm -f test amodemd v21_softmodem;				\
+	rm -f test amodemd;						\
 	cd $${build_dir};						\
 	tar cfz $${fax_dir}.tar.gz $${fax_dir};				\
-	rm -rf $${fax_dir};						\
 	)

@@ -52,12 +52,19 @@ initialize.  I will concentrate on the simple one (no V.8 support):
    Calling fax                                                     Called fax
 
 1) ====================== Connection established ============================
+                               Phase A Begin
+
 
 2)                                        <---------- Keep quiet 0.2s or more
 
 3) Start sending CNG (Calling tone) ------------>
 
 4)             <---------- Start sending CED (Called terminal identification)
+
+
+                               Phase A End
+   ===========================================================================
+                              Phase B Begin
 
 5)                                            <---------- Keep quiet for 75ms
 
@@ -129,13 +136,33 @@ parenthesis are optional):
 
      CNG --------------------->         <--------------- CED
 
+                               Phase A End
+   ===========================================================================
+                              Phase B Begin
+
                                         <--- (NSF) (CSI) DIS
 
      (PWD) (SUB) (TSI) DCS --->
 
      Training, TCF ===========>
 
-     ...
+                               Phase B End
+   ===========================================================================
+                              Phase C Begin
+    
+    FAX-MSG ==========>
+
+                               Phase C End
+   ===========================================================================
+                              Phase D Begin
+
+     EOM --------------------->
+                                        <--------------- MCF
+
+                               Phase D End
+   ===========================================================================
+                                Disconect
+
 
 If the fax transfer is going the other way, from the called party to
 the calling party (You call a fax-machine and fetches a document from
@@ -144,6 +171,10 @@ it - don't ask me how), the following happens:
      Calling fax                                  Called fax
 
      CNG --------------------->         <--------------- CED
+
+                               Phase A End
+   ===========================================================================
+                              Phase B Begin
 
                                         <--- (NSF) (CSI) DIS
 
@@ -155,9 +186,23 @@ it - don't ask me how), the following happens:
 
      CFR --------------------->
 
-                                        <= Training, FAX-MSG
+                               Phase B End
+   ===========================================================================
+                              Phase C Begin
 
-     ...
+                                        <=============== FAX-MSG
+
+                               Phase C End
+   ===========================================================================
+                              Phase D Begin
+
+                                        <--------------- EOM
+     MCF --------------------->
+
+                               Phase D End
+   ===========================================================================
+                                Disconect
+
 
 The 'Training' part is the first high-speed transfer (indicated
 by a "thicker" arrow).  Training is a fixed signal sent to

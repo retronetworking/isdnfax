@@ -129,7 +129,7 @@ static void handle_call(void)
     if ( samples < 0 )
       break;
     decrease_timers(samples);
-    fax_run_internals(fax);
+    fax_run_internals(fax);  // runs the state machine
   }
 }
 

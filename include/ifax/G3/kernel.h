@@ -5,7 +5,8 @@
    Take care of the main housekeeping-work in the fax-system
 
    Copyright (C) 1999 Morten Rolland [Morten.Rolland@asker.mail.telia.com]
-  
+   Copyright (C) 1999 Thomas Reinemannn [tom.reinemann@gmx.net]
+
    Permission is hereby granted, free of charge, to any person obtaining a
    copy of this software and associated documentation files (the "Software"),
    to deal in the Software without restriction, including without limitation
@@ -29,3 +30,5 @@
 #include <ifax/G3/fax.h>
 
 extern void fax_run_internals(struct G3fax *fax);
+extern void call_subroutine(struct G3fax *fax);
+extern void return_from_subroutine(struct G3fax *fax);

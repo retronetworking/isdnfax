@@ -5,7 +5,8 @@
    Definition of timers used by G3-fax
 
    Copyright (C) 1999 Morten Rolland [Morten.Rolland@asker.mail.telia.com]
-  
+   Copyright (C) 1999 Thomas Reinemannn [tom.reinemann@gmx.net]
+
    Permission is hereby granted, free of charge, to any person obtaining a
    copy of this software and associated documentation files (the "Software"),
    to deal in the Software without restriction, including without limitation
@@ -27,3 +28,4 @@
 */
 
 #define TIMER_AUX         6
+#define TIMER_DIAL        7

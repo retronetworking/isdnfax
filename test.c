@@ -36,16 +36,23 @@
 
 #include <ifax/ifax.h>
 
+#include <ifax/modules/debug.h>
+#include <ifax/modules/scrambler.h>
+#include <ifax/modules/modulator-V29.h>
+
+
 int     send_to_audio_construct(ifax_modp self,va_list args);
 int     pulsegen_construct(ifax_modp self,va_list args);
 int     sinegen_construct(ifax_modp self,va_list args);
-int     scrambler_construct(ifax_modp self, va_list args);
-int     modulator_V29_construct(ifax_modp self, va_list args);
+int     rateconvert_construct(ifax_modp self, va_list args);
 int     fskdemod_construct(ifax_modp self, va_list args);
 int     fskmod_construct(ifax_modp self, va_list args);
 int     decode_serial_construct(ifax_modp self, va_list args);
 int     encode_serial_construct(ifax_modp self, va_list args);
 int     debug_construct(ifax_modp self, va_list args);
+
+extern signed short rate_7k2_8k_1[250];
+
 #include <ifax/modules/replicate.h>
 
 ifax_module_id	IFAX_TOAUDIO;
@@ -54,6 +61,7 @@ ifax_module_id	IFAX_SINEGEN;
 ifax_module_id	IFAX_REPLICATE;
 ifax_module_id  IFAX_SCRAMBLER;
 ifax_module_id  IFAX_MODULATORV29;
+ifax_module_id  IFAX_RATECONVERT;
 ifax_module_id  IFAX_FSKDEMOD;
 ifax_module_id  IFAX_FSKMOD;
 ifax_module_id  IFAX_DECODE_SERIAL;
@@ -71,7 +79,8 @@ void setup_all_modules(void)
 	IFAX_DECODE_SERIAL= ifax_register_module_class("Serializer",decode_serial_construct);
 	IFAX_ENCODE_SERIAL= ifax_register_module_class("Serial encoder",encode_serial_construct);
 	IFAX_SCRAMBLER    = ifax_register_module_class("Bitstream scrambler",scrambler_construct);
-	IFAX_MODULATORV29 = ifax_register_module_class("V.29 Modulator 9600",modulator_V29_construct);
+	IFAX_MODULATORV29 = ifax_register_module_class("V.29 Modulator",modulator_V29_construct);
+	IFAX_RATECONVERT  = ifax_register_module_class("Sample-rate converter",rateconvert_construct);
 	IFAX_DEBUG        = ifax_register_module_class("Debugger",debug_construct);
 }
 
@@ -103,10 +112,11 @@ void transmit_carrier(void)
 
 }
 
-void test_modulator(void)
+void test_modulator_V29(void)
 {
-  ifax_modp  scrambler, modulator;
+  ifax_modp  scrambler, modulator, rateconvert, debug;
   unsigned char data;
+  unsigned int status;
 
   /* Test scrambler as a module */
   scrambler = ifax_create_module(IFAX_SCRAMBLER);
@@ -114,11 +124,46 @@ void test_modulator(void)
   /* Modulate into signed shorts */
   modulator = ifax_create_module(IFAX_MODULATORV29);
 
-  scrambler->sendto = modulator;
+  /* Rateconvert from 7200 Hz to 8000 Hz */
+  rateconvert = ifax_create_module(IFAX_RATECONVERT,10,9,250,
+				   rate_7k2_8k_1,0x10000);
 
-  /* Count from 0 to 20 and see what the scrambler/modulator says */
-  for ( data=0; data <= 20; data++ )
+  /* Print samples of standard output for analysis */
+  debug = ifax_create_module(IFAX_DEBUG,0,DEBUG_FORMAT_SIGNED16BIT,
+			     DEBUG_METHOD_STDOUT);
+
+  scrambler->sendto = modulator;
+  modulator->sendto = rateconvert;
+  rateconvert->sendto = debug;
+
+
+  /* Initialize the scrambler, and start a V.29
+   * synchronization sequence.  When we reach 
+   * segment 4, we let the scrambler take over
+   * and feed it with 1's until the modulator
+   * enters the DATA phase.
+   */
+
+  ifax_command(scrambler,CMD_SCRAMBLER_INIT);
+  ifax_command(modulator,CMD_MODULATORV29_STARTSYNC);
+
+  for (;;) {
+    ifax_command(modulator,CMD_MODULATORV29_MAINTAIN,&status);
+    if ( status & MODULATORV29_STATUS_SEGMENT4 )
+      break;
+  }
+
+  data = 255;
+  for (;;) {
     ifax_handle_input(scrambler,&data,1);
+    ifax_command(modulator,CMD_MODULATORV29_MAINTAIN,&status);
+    if ( status & MODULATORV29_STATUS_DATA )
+      break;
+  }
+
+  /* The synchronization sequence has now completed,
+   * and we may continue with payload data.
+   */
 }    
 
 
@@ -126,5 +171,6 @@ void main(int argc,char **argv)
 {
 	setup_all_modules();
 
-	transmit_carrier();
+	/* transmit_carrier(); */
+	test_modulator_V29();
 }

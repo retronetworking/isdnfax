@@ -5,7 +5,7 @@ SUBDIRS = lib modules
 
 MODULES = modules/modules.a lib/isdnlib.a
 
-PROGRAMS = v21_softmodem
+PROGRAMS = v21_softmodem test
 
 all: subdirs $(PROGRAMS)
 
@@ -14,6 +14,9 @@ subdirs:
 
 v21_softmodem:	v21_softmodem.o $(OBJECTS) $(MODULES)
 	$(CC) -o $@ $^ $(LDFLAGS) 
+
+test:	test.o $(OBJECTS) $(MODULES)
+	$(CC) -o $@ $^ $(LDFLAGS)
 
 clean:
 	rm -f $(OBJECTS) $(MODULES) $(PROGRAMS) *~ *.o

@@ -40,8 +40,10 @@
 #include <ifax/G3/fax.h>
 #include <ifax/G3/kernel.h>
 #include <ifax/G3/g3-timers.h>
+#include <ifax/G3/commandframes.h>
 #include <ifax/misc/timers.h>
 #include <ifax/misc/softsignals.h>
+#include <ifax/misc/statemachine.h>
 #include <ifax/modules/hdlc-framing.h>
 
 
@@ -55,49 +57,20 @@
 #define THREESECONDS			     24000
 #define THREEPOINTEIGHTSECONDS               30400
 #define SIXSECONDS			     48000
-#define T2_TIME				     48000
 #define TENSECONDS			     80000
-#define T3_TIME  			     80000
-#define THIRTYFIFESECONDS		    280000
-#define T1_TIME				    280000
+#define THIRTYFIVESECONDS		    280000
 #define SIXTYSECONDS			    480000
-#define T5_TIME				    480000
 
+#define T1_TIME                        THIRTYFIVESECONDS
+#define T2_TIME			       SIXSECONDS
+#define T3_TIME  		       TENSECONDS
+#define T5_TIME			       SIXTYSECONDS
 
-/* Use the following macros when defining the states */
-
-#define STATE(x) static void x(struct G3fax *fax)
-#define DEFSTATE(x) static void x(struct G3fax *);
-
-
-/* When waiting for a specified ammount of time, and doing nothing
- * else, the simple_wait() function can be used.  It simply inserts
- * a "waiting-state" into the flow of things, using the TIMER_AUX
- * timer, and jumps to the specified "next-state" once the wait
- * is over.
+/* Global states that may get called from other files as well as from
+ * this one.
  */
 
-STATE(simple_wait_state)
-{
-  if ( softsignaled(TIMER_AUX) )
-    fax->fsm = fax->simple_wait_next_state;
-}
-
-void simple_wait(struct G3fax *fax, ifax_sint32 delay,
-		 void (*state)(struct G3fax *))
-{
-  fax->simple_wait_next_state = state;
-  fax->fsm = simple_wait_state;
-  one_shot_timer(TIMER_AUX,delay);
-}
-
-/* The following states are subroutines that must be called by means
- * of the 'invoke_subroutine' function.
- */
-
-/* DEFSTATE(response_received) */
-
-
+DEFGLOBALSTATE(fsm_wait_softsignal)
 
 
 /* List states here that is called in a forward fashion (most of them) */
@@ -107,61 +80,113 @@ DEFSTATE(do_CED)
 DEFSTATE(done_CED)
 DEFSTATE(start_DIS)
 DEFSTATE(do_DIS)
-
 DEFSTATE(done_DIS)
+DEFSTATE(hunt_for_DCS_or_DTC)
 
 
-
-/* Jump to 'start_answering_call' when an incomming call is
+/* Jump to 'start_answer_incomming' when an incomming call is
  * accepted (answered) and we identify ourselves as a fax-machine.
  * The initialize_fsm_incomming() function is used to initialize the fsm
  * and signal-chain to handle an incomming call and jump to this state.
  */
-void initialize_fsm_incomming(struct G3fax *fax)
+
+void fax_initialize_fsm_incomming()
 {
-  fax->fsm = start_answer_incomming;
-  fax_run_internals(fax);      // calls the state machine
+  fax_setup_outgoing_DIS();   /* Prepare data-frames in 'fax' structure */
+  fax_setup_outgoing_NSF();
+  fax_setup_outgoing_CSI();
+
+  initialize_statemachines(); /* Reset all state-machines for a fresh start */
+  init_fsm(FSM_FAX_MAIN,start_answer_incomming);  /* Get the main one going */
+
+  ifax_connect(fax->silence,fax->rateconv7k2to8k0);  /* Start off silent */
 }
 
 STATE(start_answer_incomming)
 {
   /* Stay silent for 0.2 seconds before outputing the CED */
-  ifax_connect(fax->silence,fax->rateconv7k2to8k0);
-  simple_wait(fax,ZEROPOINTTWOSECONDS,do_CED);
+  FSMWAITJUMP(TIMER_AUX,ZEROPOINTTWOSECONDS,do_CED);
 }
 
 STATE(do_CED)
 {
   /* Output the CED sinus signal for 3.8 sec */
   ifax_connect(fax->sinusCED,fax->rateconv7k2to8k0);
-  simple_wait(fax,THREEPOINTEIGHTSECONDS,done_CED);
+  FSMWAITJUMP(TIMER_AUX,THREEPOINTEIGHTSECONDS,done_CED);
 }
 
 STATE(done_CED)
 {
   /* After the CED, wait 75ms and do the DIS */
   ifax_connect(fax->silence,fax->rateconv7k2to8k0);
-  simple_wait(fax,SEVENTYFIVEMILLISECONDS,start_DIS);
+  FSMWAITJUMP(TIMER_AUX,SEVENTYFIVEMILLISECONDS,start_DIS);
 }
 
 STATE(start_DIS)
 {
+  /* When we hook up the HDLC+V.21 they go online and send FLAGs */
   ifax_connect(fax->modulatorV21,fax->rateconv7k2to8k0);
   ifax_connect(fax->encoderHDLC,fax->modulatorV21);
-  fax->fsm = do_DIS;
-  simple_wait(fax,ONESECOND,do_DIS);
+
+  /* Keep sending FLAGs for one second before proceeding with real frames */
+  FSMWAITJUMP(TIMER_AUX,ONESECOND,do_DIS);
 }
 
 STATE(do_DIS)
 {
-  ifax_command(fax->encoderHDLC,CMD_FRAMING_HDLC_TXFRAME,"heisann!",8,255);
-  fax->fsm = done_DIS;
+  /* After one second of FLAGs, we transmit the DIS (and optional frames) */
+
+  if ( fax->NSFsize ) {
+    /* There is a NSF */
+    ifax_command(fax->encoderHDLC,CMD_HDLC_FRAMING_TXFRAME,
+		 fax->NSF,fax->NSFsize,255);
+  }
+
+  if ( fax->CSIsize ) {
+    /* There is a CSI */
+    ifax_command(fax->encoderHDLC,CMD_HDLC_FRAMING_TXFRAME,
+		 fax->CSI,fax->CSIsize,255);
+  }
+
+  /* Assume there is a DIS (it better...) */
+  ifax_command(fax->encoderHDLC,CMD_HDLC_FRAMING_TXFRAME,
+	       fax->DIS,fax->DISsize,255);
+
+  FSMJUMP(done_DIS);
 }
 
 STATE(done_DIS)
 {
+  /* Wait until the HDLC-frames has been transmitted before receiving */
+  if ( ifax_command(fax->encoderHDLC,CMD_HDLC_FRAMING_IDLE) > 2 ) {
+    ifax_connect(fax->silence,fax->rateconv7k2to8k0);
+    FSMJUMP(hunt_for_DCS_or_DTC);
+  }
 }
 
+STATE(hunt_for_DCS_or_DTC)
+{
+  ifax_connect(fax->silence,fax->rateconv7k2to8k0);
+}
+
+
+
+/**********************************************************************
+ *
+ * Utility functions/states/subroutines.
+ */
+
+/* The 'fsm_wait_softsignal' is a subroutine called by the 'FSMWAIT' macro
+ * to perform the actual waiting... May be used to wait for other signals
+ * as well.
+ */
+
+GLOBALSTATE(fsm_wait_softsignal)
+{
+  if ( softsignaled_clr(fsmself->arg) ) {
+    FSMRETURN;
+  }
+}
 
 
 #if 0
@@ -579,10 +604,4 @@ STATE(command_received_disconnect)
   return_from_subroutine(fax);
 }
 
-
-
-
-
 #endif
-
-

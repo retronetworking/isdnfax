@@ -28,5 +28,6 @@
 
 #include <ifax/G3/fax.h>
 
-extern void initialize_fsm_incomming(struct G3fax *);
-extern void initialize_fsm_sending(struct G3fax *fax);
+extern void fax_initialize_fsm_incomming(void);
+extern void fax_initialize_fsm_outgoing(void);
+extern void fax_initialize_fsm_sending(void);

@@ -1,6 +1,14 @@
 Changelog:
 ----------
 
+99-07-02 [becka]:
+	* Changes to fsk_demod:
+	  - First parameter at creation now gives samplerate. Allows for 
+	    7200 samples/second.
+	  - Changed demodulator to read signed 16 encoded data. Hope that
+	    works.
+	  - Heavily commented it.
+
 99-07-01 [morten]:
 	* Added new framework for State-machines, see misc/statemachines.c
 	  and G3/fsm.c

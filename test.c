@@ -39,6 +39,7 @@
 #include <ifax/modules/debug.h>
 #include <ifax/modules/scrambler.h>
 #include <ifax/modules/modulator-V29.h>
+#include <ifax/modules/modulator-V21.h>
 
 
 int     send_to_audio_construct(ifax_modp self,va_list args);
@@ -62,6 +63,7 @@ ifax_module_id	IFAX_SINEGEN;
 ifax_module_id	IFAX_REPLICATE;
 ifax_module_id  IFAX_SCRAMBLER;
 ifax_module_id  IFAX_MODULATORV29;
+ifax_module_id  IFAX_MODULATORV21;
 ifax_module_id  IFAX_RATECONVERT;
 ifax_module_id  IFAX_FSKDEMOD;
 ifax_module_id  IFAX_FSKMOD;
@@ -83,6 +85,7 @@ void setup_all_modules(void)
 	IFAX_DECODE_HDLC  = ifax_register_module_class("HDLC decoder",decode_hdlc_construct);
 	IFAX_SCRAMBLER    = ifax_register_module_class("Bitstream scrambler",scrambler_construct);
 	IFAX_MODULATORV29 = ifax_register_module_class("V.29 Modulator",modulator_V29_construct);
+	IFAX_MODULATORV21 = ifax_register_module_class("V.21 Modulator",modulator_V21_construct);
 	IFAX_RATECONVERT  = ifax_register_module_class("Sample-rate converter",rateconvert_construct);
 	IFAX_DEBUG        = ifax_register_module_class("Debugger",debug_construct);
 }
@@ -195,6 +198,37 @@ void test_scrambler(void)
   ifax_handle_input(scrambler,source,200);
 }
 
+
+/* Test new V.21 modulator */
+
+void test_modulator_V21(void)
+{
+  ifax_modp modulator, rateconvert, debug;
+  unsigned char data;
+  int t,v ;
+
+  /* Modulate into signed shorts */
+  modulator = ifax_create_module(IFAX_MODULATORV21,2);
+
+  /* Rateconvert from 7200 Hz to 8000 Hz */
+  rateconvert = ifax_create_module(IFAX_RATECONVERT,10,9,250,
+				   rate_7k2_8k_1,0x10000);
+
+  /* Print samples of standard output for analysis */
+  debug = ifax_create_module(IFAX_DEBUG,0,DEBUG_FORMAT_SIGNED16BIT,
+			     DEBUG_METHOD_STDOUT);
+
+  modulator->sendto = rateconvert;
+  rateconvert->sendto = debug;
+
+  v = 0xFFF407F;
+
+  for ( t=0; t < 200; t++ ) {
+    data = 1;
+    ifax_handle_input(modulator,&data,1);
+  }
+}
+
 /* HDLC testing code
  */
 static void test_hdlc(void)
@@ -254,6 +288,7 @@ void main(int argc,char **argv)
 
 	/* transmit_carrier(); */
 	/* test_modulator_V29(); */
+	/* test_modulator_V21(); */
 //	test_scrambler();
 	test_hdlc();
 }

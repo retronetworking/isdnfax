@@ -26,6 +26,7 @@
 ******************************************************************************
 */
 
-#define CMD_FRAMING_HDLC_TXFRAME  0x01
+#define CMD_HDLC_FRAMING_TXFRAME  0x01
+#define CMD_HDLC_FRAMING_IDLE     0x02
 
 int encoder_hdlc_construct(ifax_modp self, va_list args);

@@ -2,7 +2,7 @@
 ******************************************************************************
 
    Fax program for ISDN.
-   Encoder and decoder for HDLC-framing.
+   Encoder for HDLC-framing.
 
    Copyright (C) 1999 Morten Rolland [Morten.Rolland@asker.mail.telia.com]
   
@@ -62,6 +62,7 @@ typedef struct {
 
   int new_frame;
   int current_frame;
+  int idle, idlebits;
 
   struct {
     size_t size;
@@ -455,12 +456,20 @@ void produce_bits(encoder_hdlc_private *priv)
 
   if ( priv->phase == IDLE ) {
     /* Send idle-FLAGS, and possibly initiate a new transfer */
+
+    if ( !priv->idle ) {
+      /* We may go idle in a few bits time, prepare for this */
+      priv->idle = 1;
+      priv->idlebits = -8 - priv->bitslide_size;
+    }
+
     if ( priv->current_frame != priv->new_frame ) {
       /* There is a frame queued up, prepare for its transmission */
       priv->phase = ADDRESS;
       priv->fcs = 0xffff;
       priv->src = &priv->framequeue[priv->current_frame].address;
       priv->remaining_bytes = 1;
+      priv->idle = 0;
     }
     /* Transmit a FLAG-sequence, no bit-stuffing applied.  This flag is
      * either an idle-channel pattern, or the initial flag of a frame.
@@ -479,25 +488,28 @@ void produce_bits(encoder_hdlc_private *priv)
   /* Advance to next phase if current phase exhausted */
   if ( priv->remaining_bytes == 0 ) {
     switch ( priv->phase ) {
+
       case ADDRESS:
 	priv->phase = PAYLOAD;
 	priv->src = priv->framequeue[priv->current_frame].start;
 	priv->remaining_bytes = priv->framequeue[priv->current_frame].size;
 	break;
+
       case PAYLOAD:
 	priv->phase = FCS;
 	priv->src = &priv->fcs_tx[0];
 	priv->remaining_bytes = 2;
 	priv->fcs_tx[0] = ~(priv->fcs & 0xff);
 	priv->fcs_tx[1] = ~((priv->fcs>>8) & 0xff);
-	
 	break;
+
       case FCS:
 	priv->phase = IDLE;
 	priv->current_frame++;
 	if ( priv->current_frame >= QUEUESIZE )
 	  priv->current_frame = 0;
 	break;
+
       case IDLE:
 	/* Should never get here, but these lines removes a compile warning */
 	break;
@@ -585,6 +597,7 @@ void encoder_hdlc_demand(ifax_modp self, size_t demand)
 	*dst++ = priv->bitslide & 0xff;
 	priv->bitslide >>= 8;
 	priv->bitslide_size -= 8;
+	priv->idlebits += 8;
       }
     }
 
@@ -598,6 +611,7 @@ void encoder_hdlc_demand(ifax_modp self, size_t demand)
       *dst++ = priv->bitslide & 0xff;
       priv->bitslide >>= do_bits;
       priv->bitslide_size -= do_bits;
+      priv->idlebits += do_bits;
       chunk_bits += do_bits;
       remaining_bits -= do_bits;
     }
@@ -623,6 +637,7 @@ static void tx_frame(encoder_hdlc_private *priv, ifax_uint8 *start,
   priv->framequeue[priv->new_frame].start = start;
   priv->framequeue[priv->new_frame].address = address;
   priv->new_frame++;
+  priv->idle = 0;
   if ( priv->new_frame >= QUEUESIZE )
     priv->new_frame = 0;
 }
@@ -635,11 +650,17 @@ int encoder_hdlc_command(ifax_modp self, int cmd, va_list cmds)
 
   switch ( cmd ) {
 
-    case CMD_FRAMING_HDLC_TXFRAME:
+    case CMD_HDLC_FRAMING_TXFRAME:
       frame_start = va_arg(cmds,ifax_uint8 *);
       frame_size = va_arg(cmds,int);
       address = va_arg(cmds,ifax_uint8);
       tx_frame(priv,frame_start,frame_size,address);
+      break;
+
+    case CMD_HDLC_FRAMING_IDLE:
+      if ( priv->idle && priv->idlebits > 0 )
+	return priv->idlebits;
+      return 0;
       break;
   }
 
@@ -668,6 +689,8 @@ int encoder_hdlc_construct(ifax_modp self,va_list args)
   priv->phase = IDLE;
   priv->new_frame = 0;
   priv->current_frame = 0;
+  priv->idle = 1;
+  priv->idlebits = 1;
 
   return 0;
 }

@@ -66,7 +66,7 @@ int gcd(int d1,int d2)
 		if (d1>d2) d1-=d2;
 		else       d2-=d1;
 	}
-	dprintf(DEBUG_INFO,"GCD is %d\n",d1);
+	ifax_dprintf(DEBUG_INFO,"GCD is %d\n",d1);
 	return d1;
 }
 

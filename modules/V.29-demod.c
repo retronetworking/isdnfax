@@ -1,7 +1,11 @@
+
 /*
    ******************************************************************************
 
    Fax program for ISDN.
+	
+	This is the V.29 demodulator. The module handles the training phase as well
+	as the final data transmission.
 
    Copyright (C) 1999 Oliver Eichler [oliver.eichler@regensburg.netsurf.de
 
@@ -32,6 +36,8 @@
 #include "../include/ifax/modules/V.29_demod.h"
 
 #define 		PHASEINC1700HZ 	15474
+#define 		INTERVAL_CNT		2
+
 
 #define		DEG0					0x0000
 #define		DEG45					0x2000
@@ -85,6 +91,7 @@
 
    typedef struct
    {
+      unsigned short agc_gain1;
       unsigned short w;
       int phi;
       short a;
@@ -103,14 +110,15 @@
    }
    V29demod_private;
 
-   short dem_lpf_coef[] =
-   {0x203E, 0x3F82, 0x203E};
+   short dem_lpf_coef[] = {0x203E, 0x3F82, 0x203E};
 
 
    short DCD (short s, V29demod_private * priv);
    short Demod (short s, V29demod_private * priv);
    short FindSeq2(V29demod_private * priv);
    short PhaseHuntSeq2(V29demod_private * priv);
+   short agc(short s, V29demod_private * priv);
+
 
    void
    V29demod_destroy (ifax_modp self)
@@ -140,13 +148,14 @@
          switch (priv->state)
          {
          
-            case NIL:
+         
+            case NIL:						/* idle and measure power */
                DCD (*ps_s, priv);
             
                ps_s++;
                break;
          
-            case LISTEN:
+            case LISTEN:					/* try to detect Segment 2 */
                DCD (*ps_s, priv);
                Demod (*ps_s, priv);
                FindSeq2(priv);
@@ -154,7 +163,8 @@
                ps_s++;
                break;
          
-            case PHASEHUNT:
+            case PHASEHUNT:				/* synchronize the carrier phase */
+            *ps_s = AGC(*ps_s, priv);
                DCD (*ps_s, priv);
                Demod (*ps_s, priv);
                PhaseHuntSeq2(priv);
@@ -189,28 +199,42 @@
       self->command = V29demod_command;
       self->handle_demand = V29demod_demand;
    
-      priv->w = 0;
-      priv->phi = 0;
-      priv->a = 0x0288;		/* equals a tau of 50 */
-      priv->state = NIL;
-      priv->dem_index = 0;
-      priv->smpl_cnt = -1;
+      priv->w = 0;				/* the carrier's omega */
+      priv->phi = 0;				/* phi to achive carrier sync. */
+      priv->a = 0x0288;			/* equals a tau of 50 for power measurement*/
+      priv->state = NIL;		/* state variable for the demodulators statemachine*/
+      priv->dem_index = 0;		/* index of the actual demodulated sample within
+   										the demodulator buffers */
+      priv->smpl_cnt = -1;		/* offset for symbol sync. 
+   										-1 stands for 'no symb. found' */
+      priv->agc_gain1 = 0x1000;	/* equals 1 in (4:12) format */ 
       return 0;
    }
 
 
-   short
-   Demod (short s, V29demod_private * priv)
+
+   short agc(short s, V29demod_private * priv)
+   {
+   
+      return (s*priv->agc_gain1)>>12;
+   }
+
+   short Demod (short s, V29demod_private * priv)
    {
       static int cnt = 0;
       int sum_Re = 0;
       int sum_Im = 0;
       unsigned short w;	
    
+   	/*modulo increment of sample index */
       priv->dem_index = (priv->dem_index < NOSYMB * NOSAMP - 1) ?
          (priv->dem_index + 1) : 0;
    
+   	/* calulate phase corrected omega */
       w = priv->w + priv->phi;
+   
+   	/*	demodulate signal. The lowpass filter supresses frequencies
+   		at 2*f_c */
       switch (cnt)
       {
          case 0:
@@ -253,6 +277,7 @@
       priv->dem_re[priv->dem_index] = sum_Re;
       priv->dem_im[priv->dem_index] = sum_Im;
    
+   	/* calculate the absolute angle of the signal */
       priv->dem_angl[priv->dem_index] = intatan (sum_Im, sum_Re);
       priv->dem_angl[priv->dem_index + NOSYMB * NOSAMP] =
          priv->dem_angl[priv->dem_index];
@@ -269,25 +294,27 @@
       int i;
       int res = 0;
    
+   	/* calculate the relative angle between two symbols */
       priv->dem_angl_dif[priv->dem_index] =
          priv->dem_angl[priv->dem_index + NOSYMB * NOSAMP] -
          priv->dem_angl[priv->dem_index + NOSYMB * NOSAMP - 3];
    
+   	/* calculate the absolute distance to the expected 135° phase difference */
       if(priv->dem_angl_dif[priv->dem_index] > 0){
          priv->dem_angl_dist[priv->dem_index] = priv->dem_angl_dif[priv->dem_index] - DEG135;
       }
       else{
          priv->dem_angl_dist[priv->dem_index] = DEG135 + priv->dem_angl_dif[priv->dem_index];
       }
-   
       abs(priv->dem_angl_dist[priv->dem_index])	;
    
-   
+   	/* check for sequence 2 every NOSYMB*NOSAMP */
       if(priv->dem_index == 0)
       {
       
-         static int flag = 1;
+         static int flag = INTERVAL_CNT;
       
+      	/* find minima within angle distance buffer */
          res |= (priv->dem_angl_dist[0] < priv->dem_angl_dist[NOSYMB*NOSAMP-1]) && 
             (priv->dem_angl_dist[0] < priv->dem_angl_dist[1]) ? 0 : 1;
          res <<= 1;
@@ -299,25 +326,49 @@
          res |= (priv->dem_angl_dist[NOSYMB*NOSAMP-1] < priv->dem_angl_dist[NOSYMB*NOSAMP-2]) && 
             (priv->dem_angl_dist[NOSYMB*NOSAMP-1] < priv->dem_angl_dist[0]) ? 0 : 1;
       
+      	/* valid received symbols will produce the binary patterns:
+      		
+      			110110110b
+      			101101101b
+      			011011011b
+      	
+      	Depending on the point of maximum likelihood for sampling, given by 
+      	the positions of '0''s in the result line, the initial value for 
+      	the sample counter is set.
+      	
+      	Depending on the absolute phases of the symbols the angle difference
+      	can be either 135° or 225°. As the distance is only derived for 135°
+      	the received signal is turned by 180° after INTERVAL_CNT (>0) decision
+      	intervals.
+      	*/
          if (res == 0x1B6) priv->smpl_cnt = 1;
          if (res == 0x16B) priv->smpl_cnt = 0;
          if (res == 0x0DB) priv->smpl_cnt = 5;
          if (priv->smpl_cnt < 0){
             if(flag){
-               flag = 0;
+               flag--;
             }
             else{
                priv->phi += DEG180;
                priv->phi &= 0x0000FFFF;
-               flag = 1;
+               flag = INTERVAL_CNT;
             }
          }
-         else{
+         else{ /* symbol sync. achieved */
+         
+         /* depending on the current symbol the sign of the angle difference
+         	will change.
+         	
+         		[n]			[n-1]
+         		135°	-		315°		< 0
+         		315° 	-		135		> 0
+         */
             if(priv->dem_angl_dif[priv->dem_index + priv->smpl_cnt] < 0)
                priv->current_symbol = V29_symb_tbl[B9600];
             else
                priv->current_symbol = V29_symb_tbl[A9600];
             priv->state = PHASEHUNT;
+            printf("Locked on symbol \n");
          }
       }
    
@@ -328,11 +379,15 @@
    PhaseHuntSeq2(V29demod_private * priv)
    {
    
+   	/* do every 3rd sample */
       if(priv->smpl_cnt == 0){
+      
+      	/* adjust phi by the current phase difference */
          priv->phi += 
             priv->current_symbol.angl - 
             priv->dem_angl[priv->dem_index];
       
+      	/* toggle symbol */
          if(priv->current_symbol.angl == DEG180)
             priv->current_symbol = V29_symb_tbl[B9600];	
          else
@@ -357,13 +412,11 @@
    
       priv->power = s_s;
    
-      if (s_s < L_MIN)
-      {
+      if (s_s < L_MIN){
          priv->state = NIL;
          return s_s;
       }
-      if (s_s > L_2)
-      {
+      if (s_s > L_2){
          if(priv->state == NIL) priv->state = LISTEN;
          return s_s;
       }

@@ -29,6 +29,7 @@
 #include <stdio.h>
 #include <stdlib.h>
 #include <stdarg.h>
+#include <string.h>
 
 #include <unistd.h>
 #include <getopt.h>
@@ -86,7 +87,7 @@ enum MODEM_MODE { ORIGINATE, ANSWER };
 
 /* The actual "modem" code.
  */
-static void test_v21(enum MODEM_MODE direction)
+static void test_v21(enum MODEM_MODE direction,int outfd)
 {
 	/* module handles for all used modules.
 	 */
@@ -174,6 +175,9 @@ static void test_v21(enum MODEM_MODE direction)
 		/* Read data from isdn4linux.
 		 */
 		IsdnReadAudio(isdnhandle,&data,1);
+		/* Log data if requested.
+		 */
+		if (outfd!=-1) write(outfd,&data,1);
 
 		/* Send back a steady 0
 		 */
@@ -223,6 +227,9 @@ static void test_v21(enum MODEM_MODE direction)
 		/* Read data from isdn4linux.
 		 */
 		IsdnReadAudio(isdnhandle,&data,1);
+		/* Log data if requested.
+		 */
+		if (outfd!=-1) write(outfd,&data,1);
 
 		/* Send it to the demodulator.
 		 */
@@ -312,7 +319,10 @@ void answer_isdn(void)
  */
 void usage(char *prgnam)
 {
-	printf("Usage: %s [-i isdndevice] -m MSN\n",prgnam);	
+	printf("Usage: %s [-i isdndevice]\n"
+	       "       -m MSN \n"
+	       "       [-d number|'answer']\n"
+	       "       [-l logfile]\n",prgnam);	
 }
 
 /* Main program. Get the arguments and set everything up.
@@ -331,6 +341,7 @@ void main(int argc,char **argv)
 	char *isdndevname="/dev/ttyI1";
 	char *numbertodial=NULL;
 	char *sourcemsn=NULL;
+	int outdata=-1;
 
 	/* Register all the modules.
 	 */
@@ -338,7 +349,7 @@ void main(int argc,char **argv)
 
 	/* Get all options from the commandline.
 	 */
-	while(EOF!=(optchr=getopt(argc,argv,"i:m:d:")))
+	while(EOF!=(optchr=getopt(argc,argv,"i:m:d:l:")))
 	{
 		switch(optchr)
 		{
@@ -357,6 +368,11 @@ void main(int argc,char **argv)
 				/* The number to dial.
 				 */
 				numbertodial=optarg; 
+				break;
+			case 'l':
+				/* The logfile name.
+				 */
+				outdata=open(optarg,O_WRONLY|O_CREAT|O_TRUNC,0644);
 				break;
 		}
 	}
@@ -394,7 +410,7 @@ void main(int argc,char **argv)
 		answer_isdn();
 		/* Go to transfer mode.
 		 */
-		test_v21(ANSWER);
+		test_v21(ANSWER,outdata);
 	}
 	else
 	{
@@ -403,11 +419,14 @@ void main(int argc,char **argv)
 		dial_isdn(numbertodial);
 		/* Go to transfer mode.
 		 */
-		test_v21(ORIGINATE);
+		test_v21(ORIGINATE,outdata);
 	}
 
 
 	/* Clean up and exit.
 	 */
+	if (outdata!=-1) {
+		close(outdata);
+	}
 	close(isdnhandle);
 }

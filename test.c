@@ -48,6 +48,7 @@ int     rateconvert_construct(ifax_modp self, va_list args);
 int     fskdemod_construct(ifax_modp self, va_list args);
 int     fskmod_construct(ifax_modp self, va_list args);
 int     decode_serial_construct(ifax_modp self, va_list args);
+int     decode_hdlc_construct(ifax_modp self, va_list args);
 int     encode_serial_construct(ifax_modp self, va_list args);
 int     debug_construct(ifax_modp self, va_list args);
 
@@ -66,6 +67,7 @@ ifax_module_id  IFAX_FSKDEMOD;
 ifax_module_id  IFAX_FSKMOD;
 ifax_module_id  IFAX_DECODE_SERIAL;
 ifax_module_id  IFAX_ENCODE_SERIAL;
+ifax_module_id  IFAX_DECODE_HDLC;
 ifax_module_id  IFAX_DEBUG;
 
 void setup_all_modules(void)
@@ -78,6 +80,7 @@ void setup_all_modules(void)
 	IFAX_FSKMOD	  = ifax_register_module_class("FSK modulator",fskmod_construct);
 	IFAX_DECODE_SERIAL= ifax_register_module_class("Serializer",decode_serial_construct);
 	IFAX_ENCODE_SERIAL= ifax_register_module_class("Serial encoder",encode_serial_construct);
+	IFAX_DECODE_HDLC  = ifax_register_module_class("HDLC decoder",decode_hdlc_construct);
 	IFAX_SCRAMBLER    = ifax_register_module_class("Bitstream scrambler",scrambler_construct);
 	IFAX_MODULATORV29 = ifax_register_module_class("V.29 Modulator",modulator_V29_construct);
 	IFAX_RATECONVERT  = ifax_register_module_class("Sample-rate converter",rateconvert_construct);
@@ -192,6 +195,58 @@ void test_scrambler(void)
   ifax_handle_input(scrambler,source,200);
 }
 
+/* HDLC testing code
+ */
+static void test_hdlc(void)
+{
+	/* module handles for all used modules.
+	 */
+	ifax_modp	fskd,totty,dehdlc;
+
+	/* helper for data in-/output
+	 */
+	unsigned char data;
+
+#if 0
+	ifax_modp	toaudio,debug,replicate;
+
+	/* debugger */
+	debug=ifax_create_module(IFAX_DEBUG,1);
+
+	/* Replicate the incoming signal. */
+	replicate=ifax_create_module(IFAX_REPLICATE);
+//	ifax_command(replicate,CMD_REPLICATE_ADD,toisdn);
+#endif
+
+	/* Now for the receiver. When all is decoded, the text is sent
+	 * to the outputhandle.
+	 */
+	totty=ifax_create_module(IFAX_TOAUDIO, write, 1/*outputhandle*/);
+
+	/* The deserializer synchronizes on the startbits and decodes
+	 * from the 0/1 stream from the demodulator to the bytes.
+	 * Its output is sent to the totty module. Seee above.
+	 */
+	dehdlc=ifax_create_module(IFAX_DECODE_HDLC,300);
+	dehdlc->sendto=totty;
+
+	/* The FSK demodulator. Takes the aLaw input stream and sends the
+	 * decoded version to the deserializer. See above. 
+	 */
+	fskd=ifax_create_module(IFAX_FSKDEMOD,1650,1850,300);
+	fskd->sendto=dehdlc;
+
+	/* Run until explicitly terminated.
+	 */
+	while(1) {
+
+		if (read(0,&data,1)!=1) break;
+
+		/* Send it to the demodulator.
+		 */
+		ifax_handle_input(fskd,&data,1);
+	}
+}
 
 void main(int argc,char **argv)
 {
@@ -199,5 +254,6 @@ void main(int argc,char **argv)
 
 	/* transmit_carrier(); */
 	/* test_modulator_V29(); */
-	test_scrambler();
+//	test_scrambler();
+	test_hdlc();
 }

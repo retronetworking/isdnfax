@@ -34,6 +34,9 @@
  * significant resources when communication is commencing.
  */
 
+/* Defining this avoids dialing, and only logs */
+#define TESTING
+
 #include <stdio.h>
 #include <strings.h>
 #include <unistd.h>
@@ -124,7 +127,9 @@ static void handle_call(void)
   int samples;
 
   for (;;) {
+#ifndef TESTING
     select_wait();
+#endif
     samples = ifax_command(linedriver,CMD_LINEDRIVER_WORK);
     if ( samples < 0 )
       break;
@@ -158,11 +163,19 @@ void main(int argc, char **argv)
   ih = IsdnInit(isdn_device,isdn_msn);
 
   linedriver = ifax_create_module(IFAX_LINEDRIVER);
+#ifndef TESTING
   ifax_command(linedriver,CMD_LINEDRIVER_ISDN,ih);
+#endif
   /* ifax_command(linedriver,CMD_LINEDRIVER_AUDIO); */
-  /* ifax_command(linedriver,CMD_LINEDRIVER_RECORD,"isdndump.dat"); */
+  ifax_command(linedriver,CMD_LINEDRIVER_RECORD,"modem.dat");
 
   initialize_G3fax(linedriver);
+
+#ifdef TESTING
+  setup_incomming();
+  handle_call();
+  exit(0);
+#endif
 
   initialize_realtime();
 
@@ -178,7 +191,7 @@ void main(int argc, char **argv)
     }
   }
 
-  ifax_command(linedriver,CMD_LINEDRIVER_RECORD,NULL);
+  ifax_command(linedriver,CMD_LINEDRIVER_RECORD,(char *)0);
   check_stack_usage();
 
   exit(0);

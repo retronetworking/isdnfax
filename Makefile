@@ -38,10 +38,11 @@ dist:
 	find . -name CVS -type d -exec rm -rf {} \; -prune;		\
 	find . -name .cvsignore -exec rm {} \; ;			\
 	find . -name \*~ -exec rm {} \;	;				\
-	find . -name \#\*\# -print ;					\
+	find . -name \#\*\# -exec rm {} ;				\
 	find . -name \*.o -exec rm {} \; ;				\
 	find . -name \*.a -exec rm {} \; ;				\
-	rm -f test amodemd;						\
+	rm -f test amodemd v21_softmodem;				\
 	cd $${build_dir};						\
 	tar cfz $${fax_dir}.tar.gz $${fax_dir};				\
+	rm -rf $${fax_dir};						\
 	)

@@ -42,7 +42,7 @@ int ifax_dprintf(enum debuglevel severity,char *format,...)
 	int rc=0;
 	va_list list;
 	
-	if (severity>debuglevel)
+	if (severity>=debuglevel)
 	{
 		va_start(list,format);
 		rc=vprintf(format,list);

@@ -1,0 +1,165 @@
+overview.txt - An overview of the 'i4lfax' project and how to code for it
+=========================================================================
+
+Sep 7 1999, by Morten Rolland [Morten.Rolland@asker.mail.telia.com]
+
+
+Filesystem layout
+=================
+
+amodemd.c                  Main program-file for 'amodemd' daemon program
+test.c                     A file with lots of code testing rest of system
+v21_softmodem.c            The very first working code, a 300 bit/s modem
+
+G3/                        Files related to G3 fax handeling
+doc/                       Some documentation files, like this one
+html/                      The *.html files as found on the 'i4lfax' homepage
+include/ifax/              Include files for the general lib directory
+include/ifax/G3            Include files for the G3 directory
+include/ifax/misc          Include files for the misc directory
+include/ifax/modules       Include files for the modules directory
+lib/                       A general lib directory
+misc/                      Various specialized modules, like ISDN and pty layer
+modules/                   DSP and link-level signaling modules
+
+
+DSP modules and signaling chains
+================================
+
+All digital signal processing and link-level formatting is performed through
+the 'modules' found in the modules directory.  A module is capable of
+accepting input, and producing an appropriate output.  Certain modules may
+also be capable of acceptin a "demand" request.  All modules are registered
+and referenced later by a handle.  Example:
+
+#include <ifax/ifax.h>
+#include <ifax/module.h>
+#include <ifax/types.h>
+#include <ifax/misc/malloc.h>
+#include <ifax/misc/regmodules.h>
+
+
+void v21_test_modulator(void)
+{
+   ifax_modp v21mod, debug;
+   ifax_uint8 *bytes;
+
+   v21mod = ifax_create_module(IFAX_MODULATORV21,2);
+   debug = ifax_create_module(IFAX_DEBUG, 0, DEBUG_FORMAT_SIGNED16BIT,
+                              DEBUG_METHOD_STDOUT);
+
+   ifax_connect((ifax_modp)0,v21mod);
+   ifax_connect(v21mod,debug);
+   ifax_connect(debug,(ifax_modp)0);
+
+   bytes = ifax_malloc(8,"byte-packed bit buffer for V.21 testing");
+
+   ifax_handle_input(v21mod,&bytes[0],64);
+}
+
+In this code, we set up a very simple signalling chain.  First we make
+an instance of IFAX_MODULATORV21 and IFAX_DEBUG into the module-pointers
+'v21mod' and 'debug'.  The instances are then connected by the
+ifax_connect function into a chain.  We connect a zero-pointer at the
+ends to terminate the signalling chain.  After the connects, we have:
+
+     null -> v21mod -> debug -> null
+
+Every module has a given "data-type".  It is not strongly enforced, so
+make sure the output of one module matches the input of the module it
+feeds into.  The IFAX_MODULATORV21 module always produces 16-bit linear
+values (samples).  The IFAX_DEBUG can handle many formats, so we make
+sure to pick a suitable one.  The arguments to ifax_create_module are
+not compile-time checked, so make sure they are correct!
+
+When this function is called, it will allocate and initialize the
+two modules, connect them, allocate a buffer and finaly send that
+buffer to the v21mod module for modulation.  The samples produced
+by the modulator is sent to the debug module for output to stdout.
+
+The format of the buffer is 8-bits in a byte, first (in time) bit
+in LSB (bit 0).  This illustrates that a module may have different
+input and output formats.
+
+NOTE 1:  Use the types of ifax/types.h, like 'ifax_sint16' to declare
+variables of a specific size and shape.
+
+NOTE 2:  Use the 'ifax_malloc(size_t bytes, char *description)'
+function to allocate memory.  It will never fail (it exits).
+It will also initialize the memory before returning, so that
+memory-locking will be more efficient.
+
+
+The linedriver module
+=====================
+
+The linedriver module is an important module in several ways. It is
+central to administrating the underlying hardware, like ISDN, and
+it is the central module that controlls the flow of the DSP-chains.
+A typical setup is like the following:
+
+   null -> TX1 -> TX2 -> TX3 -> linedriver -> RX1 -> RX2 -> RX3 -> null
+
+When there are samples to be processed, the linedriver is called, and
+it will do a few things:
+
+It will read samples from the hardware, and push them into the receive
+signalling chain by sending them to the RX1 module with the
+ifax_handle_input function.  Then it will activate the transmit
+signalling chain to obtain the same number of outgoing samples as was
+received (they have to balance).
+
+The transmit signalling chain is activated by making a "demand"
+function call to the TX3 module (in the above scenario).  The demand
+call will include how many units of data is required, and TX3
+will deliver this ammount, or more.  TX3 will have to pass the
+demand call further up the chain to TX2 if it can't produce
+the requested output without any input.  If the number of data
+units are not related in a 1:1 relationship, the TX3 module will
+calculate a new value for the number of data units it needs, and
+demand this ammount from TX2.  We must make sure the new demand
+value is too large, rather than too small.
+
+At some stage a module will be able to produce output without
+any further input, and it does so and calls the ifax_handle_input
+function of the module down the chain to satisfy the previous
+demand call.  The ifax_handle_input call of the previous module
+will result in a new call the the next module etc. until data
+arrives at the linedriver.  If all the demand-value calculations
+have been correct, the linedriver will have at least as much
+data as it originaly demanded (needs larger buffers to store
+surplus samples).
+
+When the ifax_handle_input function of the linedriver has been
+called, the TX-buffer of the linedriver is filled, and the
+ifax_handle_input function returns.  So does all the other until
+control reaches the module that could originally provide data,
+and it returns further to the demand functions and all the way back
+to the linedriver.
+
+As we can see from this setup, all modules used in the transmit
+signalling chain needs to support the "demand" function, while
+the modules in the receive signalling chain don't have to support
+the "demand" function, as they only push available data downstream.
+
+Also: The transmit signalling chain needs to have an ultimate
+source of data, which will never run out, in the TX1 position.
+If this is not the case, a demand call up the chain would fall
+off the end and segfault the program.
+
+In a typical setup, this is solved by having the ultimate source
+produce idle-patterns or silence if no data available.  In the
+case of the HDLC-encoder, this is very simply done:  When the
+hdlc-encoder module has no data-frames ready for transmission,
+it just produces idle-patterns.
+
+HDLC-frames to be transmitted is delivered to the hdlc-encoder
+module by the command-interface:
+
+  ifax_command(hdlcencoder,CMD_HDLC_FRAMING_TXFRAME,
+               &buffer[0], framesize, address);
+
+There are no argument-checking for this function either, so
+make sure it matches the proper usage of the modules
+command-interface.
+

@@ -98,11 +98,11 @@ struct HardwareHandle {
 
 	/* Read a number of samples from the hardware driver.
 	 */
-	void (*read)(struct HardwareHandle *hh, ifax_uint8 *samples);
+	void (*read)(struct HardwareHandle *hh, ifax_uint8 *smpls, int cnt);
 
 	/* Write a number of (16-bit signed) samples to the hardware driver.
 	 */
-	void (*write)(struct HardwareHandle *hh, ifax_sint16 *samples);
+	void (*write)(struct HardwareHandle *hh, ifax_sint16 *smpls, int cnt);
 
 	/* Supply the hardware driver with configuration parameters.
 	 */

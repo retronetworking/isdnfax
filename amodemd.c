@@ -197,7 +197,7 @@ void main(int ac, char **av)
 	mh = modem_initialize();
 
 	linedriver = ifax_create_module(IFAX_LINEDRIVER);
-	ifax_command(linedriver,CMD_LINEDRIVER_ISDN,hh);
+	ifax_command(linedriver,CMD_LINEDRIVER_HARDWARE,hh);
 
 	/* ifax_command(linedriver,CMD_LINEDRIVER_AUDIO); */
 	/* ifax_command(linedriver,CMD_LINEDRIVER_RECORD,"modem.dat"); */

@@ -34,6 +34,8 @@
  * and work with the hardware abstraction layer in 'hardware-driver.c'
  */
 
+#define _GNU_SOURCE
+
 #define FSM_DEBUG_STATES
 
 #include <stdio.h>
@@ -178,27 +180,33 @@ static void isdn_service_select(struct HardwareHandle *hh, fd_set *rfd,
 }
 
 
-/* Write a set of voice samples to the ISDN device.  The samples are in the
+/*
+ * Write a set of voice samples to the ISDN device.  The samples are in the
  * form of an array, containing 16-bit signed, linear values.
  * The array is *modified* by this function to the linear values actually
  * transmitted.  This is to help an echo cancel function to work on the true
  * values as sent over the ISDN line to the remote end.
- *
- * The number of samples that needs to be sent is dictated by the value
- * in the hardware driver handle: hh->write_size.  This function will assume
- * there are exactly this many samples in the 'src' array.
  */
 
-static void isdn_write_samples(struct HardwareHandle *hh, ifax_sint16 *src)
+#define ISDN_MAX_WRITE	4096
+
+static void isdn_write_samples(struct HardwareHandle *hh,
+			       ifax_sint16 *src, int cnt)
 {
 	struct IsdnHandle *ih = hh->private;
 	ifax_uint8 *dst, wala;
 	ifax_uint16 linear;
-	int t;
-	
-	dst = &ih->tmp_write[0];
+	ifax_uint8 tmp[2 * ISDN_MAX_WRITE];
 
-	for ( t=0; t < hh->write_size; t++ ) {
+	if ( cnt > ISDN_MAX_WRITE ) {
+	  ifax_dprintf(DEBUG_ERROR,"Dropping %d samples in isdn_write_samples",
+		       cnt - ISDN_MAX_WRITE);
+	  cnt = ISDN_MAX_WRITE;
+	}
+
+	dst = &tmp[0];
+
+	while ( cnt-- > 0 ) {
 
 		linear = (ifax_uint16) *src;
 		wala = sint2wala[linear>>4];
@@ -209,8 +217,7 @@ static void isdn_write_samples(struct HardwareHandle *hh, ifax_sint16 *src)
 		*dst++ = wala;
 	}
 
-	iobuffer_fill(ih->outgoing_buffer,&ih->tmp_write[0],
-		      dst - &ih->tmp_write[0]);
+	iobuffer_fill(ih->outgoing_buffer, &tmp[0], dst - &tmp[0]);
 }
 
 

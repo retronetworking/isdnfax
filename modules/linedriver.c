@@ -26,19 +26,8 @@
 ******************************************************************************
 */
 
-/* NOTE: This code deals with timing-critical device-driver
- *       buffering with synchronized read/write on same
- *       device and between devices (ISDN/Audio).
- *       The relationships between buffer-sizes, read/write
- *       strategy and possible timing glitches should be
- *       investigated more closely. UPDATE: Should work well
- *       as long as (low-level) transmit-buffer is
- *       pre-charged to avoid draining.
- *
- * BUGS: Error situations are not handeled well (no warnings etc.)
- */
-
-/* Maintain buffers and send/receive samples to the underlying
+/*
+ * Maintain buffers and send/receive samples to the underlying
  * physical transmission medium, like ISDN or a soundcard, named
  * pipes for faxing self (debugging) etc.
  *
@@ -83,7 +72,8 @@
 #include <ifax/misc/isdnline.h>
 #include <ifax/modules/linedriver.h>
 
-/* These defines should probably be run-time configurable.
+/*
+ * These defines should probably be run-time configurable.
  * BUFFERSIZE is the size of the main output buffer which is
  * filled by the handle function (incomming signal-chain).
  * We need a buffer here since the signaling-chain may not generate
@@ -97,7 +87,8 @@
 #define MAXIOSIZE       256
 
 
-/* An instance of this linedriver module holds the following
+/*
+ * An instance of this linedriver module holds the following
  * state-information and buffer storage.
  */
 
@@ -122,7 +113,8 @@ typedef struct {
 } linedriver_private;
 
 
-/* Method of operation:
+/*
+ * Method of operation:
  *
  * The 'handle' function is called, possibly as a result of a 'demand'
  * request, with data to fill the output queue (TX).  However, no data
@@ -154,97 +146,101 @@ static int linedriver_handle(ifax_modp self, void *data, size_t length)
 
 static int work(ifax_modp self)
 {
-  int wanted, chunk, total, more, t;
-  ifax_sint32 sp;
-  ifax_uint32 up;
-  linedriver_private *priv = self->private;
+	int wanted, chunk, total, more, t;
+	ifax_sint32 sp;
+	ifax_uint32 up;
+	linedriver_private *priv = self->private;
+	struct HardwareHandle *hh;
 
-  /* When driving the ISDN-line, this is how it works:
-   * Read as much as we can from the line, and then
-   * transmit *exactly* as much.  This will keep the
-   * flow of samples smooth.  It may be a very good idea
-   * to pre-charge the output-buffers somewhat to be more
-   * resistant to buffer-drains during heavy computations.
-   */
+	/* When driving the ISDN-line, this is how it works:
+	 * Read as much as we can from the line, and then
+	 * transmit *exactly* as much.  This will keep the
+	 * flow of samples smooth.  It may be a very good idea
+	 * to pre-charge the output-buffers somewhat to be more
+	 * resistant to buffer-drains during heavy computations.
+	 */
 
-  total = more = 0;
+	total = more = 0;
 
-  do {
+	do {
 
-    chunk = MAXIOSIZE;      /* Default buffer-size of IO-operations */
+		chunk = MAXIOSIZE;	/* Default size of IO-operations */
 
-    if ( priv->ih != 0 ) {
-      /* ISDN is online, read first, then transmit */
-      chunk = IsdnReadSamples(priv->ih,&priv->rx_buffer[0],MAXIOSIZE);
-      if ( chunk < 0 )
-	return -1;
-      more = chunk == MAXIOSIZE;
-    } else
-      for ( t=0; t < chunk; t++)
-	priv->rx_buffer[t] = 0;
+		if ( priv->hh != 0 && priv->hh->state == ONLINE ) {
+			/* Hardware is online, read first, then transmit */
+			hh = priv->hh;
+			chunk = hh->read(hh,&priv->rx_buffer[0],MAXIOSIZE);
+			if ( chunk < 0 )
+				return -1;
+			more = chunk == MAXIOSIZE;
+		} else {
+			for ( t=0; t < chunk; t++)
+				priv->rx_buffer[t] = 0;
+		}
+		
 
-    /* Fill output queue by demanding data (if needed) */
-    while ( priv->output.size < chunk ) {
-      wanted = chunk - priv->output.size + 5;
-      ifax_handle_demand (self->recvfrom, wanted);
-    }
+		/* Fill output queue by demanding data (if needed) */
+		while ( priv->output.size < chunk ) {
+			wanted = chunk - priv->output.size + 5;
+			ifax_handle_demand (self->recvfrom, wanted);
+		}
 
-    /* Prepare TX-buffer */
-    priv->output.size -= chunk;
-    for (t = 0; t < chunk; t++) {
-      priv->tx_buffer[t] = priv->output.buffer[priv->output.rp++];
-      if ( priv->output.rp >= BUFFERSIZE )
-	priv->output.rp = 0;
-    }
+		/* Prepare TX-buffer */
+		priv->output.size -= chunk;
+		for (t = 0; t < chunk; t++) {
+			priv->tx_buffer[t] = priv->output.buffer[priv->output.rp++];
+			if ( priv->output.rp >= BUFFERSIZE )
+				priv->output.rp = 0;
+		}
 
-    if ( priv->ih != 0 ) {
-      /* ISDN is online, send TX-buffer */
-      IsdnWriteSamples(priv->ih,&priv->tx_buffer[0],chunk);
-    }
+		if ( priv->ih != 0 ) {
+			/* ISDN is online, send TX-buffer */
+			IsdnWriteSamples(priv->ih,&priv->tx_buffer[0],chunk);
+		}
 
-    if ( priv->loopback ) {
-      /* Software loopback enabled, overwrite receive-buffer */
-      for ( t=0; t < chunk; t++ )
-	priv->rx_buffer[t] = priv->tx_buffer[t];
-    }
+		if ( priv->loopback ) {
+			/* Software loopback enabled, overwrite receive-buffer */
+			for ( t=0; t < chunk; t++ )
+				priv->rx_buffer[t] = priv->tx_buffer[t];
+		}
 
-    if ( priv->dsp_fd >= 0 ) {
-      /* Soundcard audio monitoring enabled */
-      for ( t=0; t < chunk; t++ ) {
-	sp = priv->tx_buffer[t] * priv->dsp_tx_volume;
-	up = sp;
-	up >>= 16;
-	priv->stereo_buffer[t+t+0] = up;
-         
-	sp = priv->rx_buffer[t] * priv->dsp_rx_volume;
-	up = sp;
-	up >>= 16;
-	priv->stereo_buffer[t+t+1] = up;
-      }
+		if ( priv->dsp_fd >= 0 ) {
+			/* Soundcard audio monitoring enabled */
+			for ( t=0; t < chunk; t++ ) {
+				sp = priv->tx_buffer[t] * priv->dsp_tx_volume;
+				up = sp;
+				up >>= 16;
+				priv->stereo_buffer[t+t+0] = up;
 
-      write(priv->dsp_fd, priv->stereo_buffer, 4*chunk);
-    }
+				sp = priv->rx_buffer[t] * priv->dsp_rx_volume;
+				up = sp;
+				up >>= 16;
+				priv->stereo_buffer[t+t+1] = up;
+			}
 
-    if ( priv->rec_fd >= 0 ) {
-      /* Recording all audio to file */
-      for ( t=0; t < chunk; t++ ) {
-	priv->stereo_buffer[t+t+0] = priv->tx_buffer[t];
-	priv->stereo_buffer[t+t+1] = priv->rx_buffer[t];
-      }
+			write(priv->dsp_fd, priv->stereo_buffer, 4*chunk);
+		}
 
-      write(priv->rec_fd, priv->stereo_buffer, 4*chunk);
-    }
+		if ( priv->rec_fd >= 0 ) {
+			/* Recording all audio to file */
+			for ( t=0; t < chunk; t++ ) {
+				priv->stereo_buffer[t+t+0] = priv->tx_buffer[t];
+				priv->stereo_buffer[t+t+1] = priv->rx_buffer[t];
+			}
 
-    if ( self->sendto != 0 ) {
-      /* Feed the receiver signaling-chain */
-      ifax_handle_input(self->sendto, &priv->rx_buffer[0], chunk);
-    }
+			write(priv->rec_fd, priv->stereo_buffer, 4*chunk);
+		}
 
-    total += chunk;
+		if ( self->sendto != 0 ) {
+			/* Feed the receiver signaling-chain */
+			ifax_handle_input(self->sendto, &priv->rx_buffer[0], chunk);
+		}
 
-  } while ( more );
+		total += chunk;
 
-  return total;
+	} while ( more );
+
+	return total;
 }
 
 static void linedriver_destroy(ifax_modp self)

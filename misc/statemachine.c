@@ -47,7 +47,7 @@
  *
  */
 
-#include <strings.h>
+#include <string.h>
 
 #include <ifax/types.h>
 #include <ifax/debug.h>

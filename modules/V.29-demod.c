@@ -72,8 +72,24 @@
 #define		L_2					0x0013
 
 #define		NIL					0x0
-#define		LISTEN				0x1
-#define		PHASEHUNT			0x2
+#define 		ESTIMATEGAIN		0x1
+#define		LISTEN				0x2
+#define		PHASEHUNT			0x3
+
+#define		TAU50
+#undef		TAU30
+#ifdef TAU50
+	#define 	AGCESTDLY			50
+	#define 	TAU					0x0288
+#endif
+#ifdef TAU30
+	#define 	AGCESTDLY			30
+	#define 	TAU					0x0432
+#endif
+#define		B						0x7FFF
+#define		LEVEL					0x16D6
+#define		LEVEL63				0x0E63
+#define		SQRT_LEVEL63		0x2AE9
 
    typedef struct 
    {
@@ -105,7 +121,7 @@
 
    typedef struct
    {
-      unsigned short agc_gain1;
+      unsigned short agc_gain;
       unsigned short w;
       int phi;
       short a;
@@ -134,8 +150,9 @@
    short Demod (short s, V29demod_private * priv);
    short FindSeq2(V29demod_private * priv);
    short PhaseHuntSeq2(V29demod_private * priv);
-   short agc(short s, V29demod_private * priv);
+   short agc_dummy(short s, V29demod_private * priv);
    short SymbolMapping(V29demod_private * priv);
+   void agc_estimate(V29demod_private *priv);
 
 
    void
@@ -160,20 +177,33 @@
       V29demod_private *priv = (V29demod_private *) self->private;
       int n;
       short *ps_s = data;
+      static short max = 0;
    
       for (n = 0; n < length; n++)
       {
+      
+         if(max<*ps_s){
+            max = *ps_s;
+            printf("max %i\n",max);
+         }
+      
+         *ps_s = (*ps_s*0x1300)>>15;
          switch (priv->state)
          {
-         
-         
             case NIL:						/* idle and measure power */
                DCD (*ps_s, priv);
             
                ps_s++;
                break;
          
+            case ESTIMATEGAIN:			/* estimate initial input gain */
+               DCD (*ps_s, priv);		
+               agc_estimate(priv);
+               ps_s++;
+               break;
+         
             case LISTEN:					/* try to detect Segment 2 */
+               *ps_s = agc_dummy(*ps_s, priv);
                DCD (*ps_s, priv);
                Demod (*ps_s, priv);
                FindSeq2(priv);
@@ -182,7 +212,7 @@
                break;
          
             case PHASEHUNT:				/* synchronize the carrier phase */
-               *ps_s = agc(*ps_s, priv);
+               *ps_s = agc_dummy(*ps_s, priv);
                DCD (*ps_s, priv);
                Demod (*ps_s, priv);
                if(priv->smpl_cnt == 0){
@@ -222,27 +252,42 @@
       self->command = V29demod_command;
       self->handle_demand = V29demod_demand;
    
-      priv->w = 0;				/* the carrier's omega */
-      priv->phi = 0;				/* phi to achive carrier sync. */
-      priv->a = 0x0288;			/* equals a tau of 50 for power measurement*/
-      priv->state = NIL;		/* state variable for the demodulators statemachine*/
-      priv->dem_index = 0;		/* index of the actual demodulated sample within
-   										the demodulator buffers */
-      priv->smpl_cnt = -1;		/* offset for symbol sync. 
-   										-1 stands for 'no symb. found' */
-      priv->agc_gain1 = 0x0D55;		/* equals 0.8333 in (4:12) format */ 
-   	/*priv->agc_gain1 = 0x1000;	/* equals 1 in (4:12) format */ 
+      priv->w = 0;						/* the carrier's omega */
+      priv->phi = 0;						/* phi to achive carrier sync. */
+      priv->a = TAU;
+      priv->state = NIL;				/* state variable for the demodulators statemachine*/
+      priv->dem_index = 0;				/* index of the actual demodulated sample within
+   												the demodulator buffers */
+      priv->smpl_cnt = -1;				/* offset for symbol sync. 
+   												-1 stands for 'no symb. found' */
+      priv->agc_gain = 0x0D55;		/* equals 0.8333 in (4:12) format */ 
       return 0;
    }
 
 
 
-   short agc(short s, V29demod_private * priv)
+   short agc_dummy(short s, V29demod_private * priv)
    {
-   
-      return (s*priv->agc_gain1)>>12;
+      return (s*priv->agc_gain)>>12;
    }
 
+   void agc_estimate(V29demod_private *priv)
+   {
+      static int cnt;
+      long	num;
+      short g;
+   
+      cnt++;
+      if(cnt == AGCESTDLY){
+         num = intsqrt(LEVEL63);
+         num <<= 12;
+         g = num/intsqrt(priv->power);
+         priv->agc_gain = g;
+         printf("I would guess gain is %04X\n", g);
+         priv->state = LISTEN;
+      }
+   
+   }
    short Demod (short s, V29demod_private * priv)
    {
       static int cnt = 0;
@@ -353,6 +398,7 @@
       if(re < 0) point = ReMinusTbl[point];
       if(im < 0) point = ImMinusTbl[point];
    
+      printf("%i\n",point);
       return 0;
    }
 
@@ -447,15 +493,26 @@
    short 
    PhaseHuntSeq2(V29demod_private * priv)
    {
+      short e;
+      static int cnt = 0;
    
      	/* adjust phi by the current phase difference */
       priv->phi += 
          priv->current_symbol.angl - 
          priv->dem_angl[priv->dem_index];
-   
+      /*printf("0x%04X\n",priv->dem_re[priv->dem_index]);*/
      	/* toggle symbol */
-      if(priv->current_symbol.angl == DEG180)
+      if(priv->current_symbol.angl == DEG180){
+         if(cnt > 10){
+            e = priv->current_symbol.Re - priv->dem_re[priv->dem_index];
+            /*printf("%04X ",e);*/
+            e = (e * B) >> 18;
+            priv->agc_gain -= e;
+            printf("agc gain: %04X\n",priv->agc_gain);
+         }
+         cnt++;
          priv->current_symbol = V29_symb_tbl[B9600];	
+      }
       else
          priv->current_symbol = V29_symb_tbl[A9600];
    
@@ -466,6 +523,7 @@
    DCD (short s, V29demod_private * priv)
    {
       int s_s;
+   
    /* Power Measurement   s_s = a*(s[n] ) + s_s[n-1]*(1-a) */
    
       s_s = (s * s) >> 15;
@@ -474,13 +532,14 @@
       s_s = s_s + priv->power;
    
       priv->power = s_s;
+      printf("power: 0x%04X\n",s_s);
    
       if (s_s < L_MIN){
          priv->state = NIL;
          return s_s;
       }
       if (s_s > L_2){
-         if(priv->state == NIL) priv->state = LISTEN;
+         if(priv->state == NIL) priv->state = ESTIMATEGAIN;
          return s_s;
       }
       return s_s;

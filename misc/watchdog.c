@@ -28,7 +28,7 @@
 
 
 #include <stdio.h>
-#include <signum.h>
+/*#include <signum.h>*/
 #include <signal.h>
 #include <sys/time.h>
 

@@ -23,6 +23,7 @@
 #include <ifax/isdn.h>
 #include <ifax/g711.h>
 #include <ifax/atan.h>
+#include <ifax/sqrt.h>
 
 
 

@@ -1,5 +1,18 @@
 Changelog:
 ----------
 
+99-06-28 [becka]:
+	* modified environment.c to not abort when realtime stuff cannot be
+	  initialized.
+	* changed amodemd to use -D foer daemon mode as used by most other
+	  daemons. -d usually means debug.
+	* Changed signalgen.c to allow for direct signal setup at
+	  construction time. IMHO we should split that module into a sine,
+	  a noise and a silence generator.
+	* Implemented syncbit.c to decouple bit extraction from the fsk-
+	  demodulator stream from the bitstream decoders.
+	* Changed hdlc_decoder to expect a bitstream. Both modules are 
+	  untested.
+
 98-11-29 [becka]:
 	* initial release.

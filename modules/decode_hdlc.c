@@ -2,8 +2,8 @@
 ******************************************************************************
 
    Fax program for ISDN.
-   Decoder for hdlc data input. Expects a datastream of alternating
-   0/1,confidence bytes at SAMPLES_PER_SECOND.
+   Decoder for hdlc data input. Expects a datastream 0/1 bytes for the
+   incoming bits at the bitrate (not samplerate).
    Outputs decoded bytes in a short int. This allows for giving a few extra
    codes for signaling start flags, checksum tests and error conditions.
    Automatically locks onto the start flag and undoes bit stuffing.
@@ -50,11 +50,6 @@
 
 typedef struct {
 
-	int	baud;
-
-	int 	lastsamp;
-	int 	bitnum;
-	int 	sampcount;
 	int	syncbitcnt;
 	int	bits;
 	int 	have_stuffed;
@@ -67,7 +62,7 @@ typedef struct {
  */
 void	decode_hdlc_destroy(ifax_modp self)
 {
-	decode_hdlc_private *priv=(decode_hdlc_private *)self->private;
+	/*decode_hdlc_private *priv=(decode_hdlc_private *)self->private;*/
 
 	free(self->private);
 
@@ -82,7 +77,7 @@ int	decode_hdlc_command(ifax_modp self,int cmd,va_list cmds)
 int	decode_hdlc_handle(ifax_modp self, void *data, size_t length)
 {
 	char *dat=data;
-	int currbit,currconf;
+	int currbit;
 	int handled,x;
 	ifax_uint16 result;
 	
@@ -92,68 +87,78 @@ int	decode_hdlc_handle(ifax_modp self, void *data, size_t length)
 	while(length--) {
 
 		currbit =*dat++;
-		currconf=*dat++;
-		priv->sampcount++;
-		
-		ifax_dprintf(DEBUG_JUNK,"bit in: %d,%d\n",currbit,currconf);
+		ifax_dprintf(DEBUG_DEBUG,"Bit %d is %d\n",priv->syncbitcnt,currbit);
 
-		if (currconf<10) continue;
-		
-		if (priv->lastsamp!=currbit) {
-			ifax_dprintf(DEBUG_JUNK,"synchronizing due to %d->%d at %d\n",priv->lastsamp,currbit,priv->sampcount);
-			priv->lastsamp=currbit;
-			priv->sampcount=-SAMPLES_PER_SECOND/2/priv->baud;
-			priv->bitnum=0;
-		} else
-		if ( priv->sampcount >= priv->bitnum*
-					SAMPLES_PER_SECOND/priv->baud)
+		/* Shift buffer up, place bit into buffer. 
+		 */
+		priv->bits<<=1;
+		priv->bits|=!!currbit;
+		priv->syncbitcnt++;
+
+		/* Check if we have a flag sequence. If yes, check CRC of the
+		 * previous block, send the appropriate code, and then a FLAG
+		 * code. Reset bitcounter and CRC calc field.
+		 */
+		if ((priv->bits&0xff)==_HDLC_FLAG)
 		{
-			ifax_dprintf(DEBUG_DEBUG,"Bit %d(%d) is %d\n",priv->syncbitcnt,priv->bitnum,currbit);
-			priv->bits<<=1;
-			priv->bits|=!!currbit;
-			priv->syncbitcnt++;
-			if ((priv->bits&0xff)==_HDLC_FLAG)
+			result= (priv->crc == _CRC_GOOD) ? 
+				HDLC_CRC_OK : HDLC_CRC_ERR;
+			if (self->sendto)
+				ifax_handle_input(self->sendto,&result,1);
+			ifax_dprintf(DEBUG_DEBUG,"HDLC CRC %s.\n",result==HDLC_CRC_OK ? "good" : "error");
+
+			result=HDLC_FLAG;
+			if (self->sendto)
+				ifax_handle_input(self->sendto,&result,1);
+			ifax_dprintf(DEBUG_DEBUG,"HDLC FLAG\n");
+
+			priv->syncbitcnt=0;
+			priv->crc=_CRC_INIT;
+			priv->have_stuffed=0;
+		} 
+		/* Check, if bit-stuffing occured. If we received a pattern of
+		 * 111110, the 0 is "stuffed" in. we remove it and flag that
+		 * we have done it to avoid doing that over and over again if
+		 * more zeroes follow.
+		 */
+		else if (!priv->have_stuffed &&(priv->bits&_HDLC_STUFFMASK)==_HDLC_STUFF)
+		{
+			/* We don't mention this on the stream. */
+			ifax_dprintf(DEBUG_DEBUG,"Stuffbit removed !\n");
+			priv->bits>>=1;
+			priv->syncbitcnt--;
+			priv->have_stuffed=1;
+		} 
+		/* Do we have a complete byte (don't check this, if stuffing 
+		 * occured - we are still in the same byte, then.
+		 */
+		else if ((priv->syncbitcnt&7)==0)
+		{
+			/* Calculate the CRC.
+			 */
+			for(x=7;x>=0;x--)
 			{
-				result= (priv->crc == _CRC_GOOD) ? 
-					HDLC_CRC_OK : HDLC_CRC_ERR;
-				if (self->sendto)
-					ifax_handle_input(self->sendto,&result,1);
-				ifax_dprintf(DEBUG_DEBUG,"HDLC CRC %s.\n",result==HDLC_CRC_OK ? "good" : "error");
-				result=HDLC_FLAG;
-				if (self->sendto)
-					ifax_handle_input(self->sendto,&result,1);
-				priv->syncbitcnt=0;
-				ifax_dprintf(DEBUG_DEBUG,"HDLC FLAG\n");
-				priv->crc=_CRC_INIT;
-			} else if (!priv->have_stuffed &&(priv->bits&_HDLC_STUFFMASK)==_HDLC_STUFF)
-			{
-				/* We don't mention this on the stream. */
-				ifax_dprintf(DEBUG_DEBUG,"Stuff !\n");
-				priv->bits>>=1;
-				priv->syncbitcnt--;
-				priv->have_stuffed=1;
-			} else if ((priv->syncbitcnt&7)==0)
-			{
-				for(x=7;x>=0;x--)
-				{
-					if (!(priv->crc&_CRC_TOPMASK) !=
-					    !(priv->bits&(1<<x))) 
-					{ 
-						priv->crc<<=1;
-						priv->crc^=_CRC_POLY;
-					}
-					else
-						priv->crc<<=1;
-					ifax_dprintf(DEBUG_JUNK,"CRC %04x\n",priv->crc);
+				if (!(priv->crc&_CRC_TOPMASK) !=
+				    !(priv->bits&(1<<x))) 
+				{ 
+					priv->crc<<=1;
+					priv->crc^=_CRC_POLY;
 				}
-				priv->have_stuffed=0;
-				result=priv->bits&0xff;
-				if (self->sendto)
-					ifax_handle_input(self->sendto,&result,1);
-				ifax_dprintf(DEBUG_DEBUG,"HDLC %x, %x\n",priv->bits&0xff,priv->crc);
+				else
+					priv->crc<<=1;
+				ifax_dprintf(DEBUG_JUNK,"CRC %04x\n",priv->crc);
 			}
-			priv->bitnum++;
-		}
+			/* We have to reset the bitstuffing flag in all 
+			 * non-stuffing cases ...
+			 */
+			priv->have_stuffed=0;
+			/* mask out the result and transmit it.
+			 */
+			result=priv->bits&0xff;
+			if (self->sendto)
+				ifax_handle_input(self->sendto,&result,1);
+			ifax_dprintf(DEBUG_DEBUG,"HDLC %x, %x\n",priv->bits&0xff,priv->crc);
+		} else	priv->have_stuffed=0;
 		handled++;
 	}
 	return handled;
@@ -169,10 +174,6 @@ int	decode_hdlc_construct(ifax_modp self,va_list args)
 	self->handle_input	=decode_hdlc_handle;
 	self->command		=decode_hdlc_command;
 
-	priv->baud=va_arg(args,int);
-
-	priv->bitnum=-1;	/* Init to "wait for sync" */
-	priv->lastsamp=2;	/* Make sure we init */
 	priv->syncbitcnt=0;
 	priv->bits=0;
 	priv->have_stuffed=0;

@@ -83,14 +83,14 @@ struct G3fax *initialize_G3fax(ifax_modp linedriver)
    * signals.  The silence generator is used during periods of silence.
    */
 
-  fax->sinusCNG = ifax_create_module(IFAX_SIGNALGEN);
-  ifax_command(fax->sinusCNG,CMD_SIGNALGEN_SINUS,7200,1100,0xA000);
+  fax->sinusCNG = ifax_create_module(IFAX_SIGNALGEN,
+  	CMD_SIGNALGEN_SINUS,7200,1100,0xA000);
 
-  fax->sinusCED = ifax_create_module(IFAX_SIGNALGEN);
-  ifax_command(fax->sinusCED,CMD_SIGNALGEN_SINUS,7200,2100,0xA000);
+  fax->sinusCED = ifax_create_module(IFAX_SIGNALGEN,
+  	CMD_SIGNALGEN_SINUS,7200,2100,0xA000);
 
-  fax->silence = ifax_create_module(IFAX_SIGNALGEN);
-  ifax_command(fax->silence,CMD_SIGNALGEN_SINUS,7200,440,0);
+  fax->silence = ifax_create_module(IFAX_SIGNALGEN,
+  	CMD_SIGNALGEN_SINUS,7200,440,0);
 
   /* The HDLC-encode is used both by the "binary coded signal"
    * and high-speed fax transfers.

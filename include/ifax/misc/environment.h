@@ -5,6 +5,7 @@
    Set up environment for a real-time daemon process like the 'amodemd'
 
    Copyright (C) 1999 Morten Rolland [Morten.Rolland@asker.mail.telia.com]
+   Copyright (C) 1999 Andreas Beck   [becka@ggi-project.org]
   
    Permission is hereby granted, free of charge, to any person obtaining a
    copy of this software and associated documentation files (the "Software"),
@@ -35,6 +36,12 @@
 #define TOTAL_STACK_USAGE                  1048576
 #define MINIMUM_FREE_STACK_SAFETY_MARGIN     20480
 
-extern void initialize_realtime(void);
+extern int  initialize_realtime(void);	
+/* RC is 0 for o.k. 
+ * |1 for unable to lock memory, 
+ * |2 for unable to get realtime priority
+ * warnings are printed in both cases.
+ */
+
 extern void start_daemon(void);
 extern void check_stack_usage(void);

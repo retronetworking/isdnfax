@@ -5,7 +5,7 @@ SUBDIRS = lib misc modules G3
 
 MODULES = misc/misc.a modules/modules.a G3/g3.a lib/isdnlib.a
 
-PROGRAMS = v21_softmodem test amodemd
+PROGRAMS = v21_softmodem amodemd #test
 
 all: subdirs $(PROGRAMS)
 

@@ -164,6 +164,7 @@ static void signalgen_destroy(ifax_modp self)
 int signalgen_construct(ifax_modp self, va_list args )
 {
   signalgen_private *priv;
+  int mode;
 
   priv = ifax_malloc(sizeof(signalgen_private),"Signalgen instance");
   self->private = priv;
@@ -174,7 +175,27 @@ int signalgen_construct(ifax_modp self, va_list args )
   self->command = signalgen_command;
 
   priv->w = 0;
-  ifax_command(self,CMD_SIGNALGEN_SINUS,8000,1000,0x10000);
+
+  mode=va_arg(args,int);
+  printf("initial mode is %x.\n",mode);
+          
+  switch(mode) {
+    case CMD_SIGNALGEN_SINUS:
+    { int rate,freq,scle;
+      rate = va_arg(args,int);
+      freq = va_arg(args,int);
+      scle = va_arg(args,int);
+      priv->phaseinc = ( 0x10000 * freq ) / rate;
+      priv->scale = scle;
+      priv->mode = CMD_SIGNALGEN_SINUS;
+      printf("parms are %d %d %x.\n",rate,freq,scle);
+    } break;
+    case CMD_SIGNALGEN_RNDBITS:
+      priv->mode = CMD_SIGNALGEN_RNDBITS;
+      break;
+    default: /* Huh ? default to something safe. */
+      ifax_command(self,CMD_SIGNALGEN_SINUS,8000,1000,0x10000);
+  }
 
   return 0;
 }

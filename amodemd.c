@@ -63,7 +63,7 @@ static struct G3fax *fax;
 
 static void usage(void)
 {
-  fprintf(stderr,"Usage: %s [-d] [-c <config-file>]\n",progname);
+  fprintf(stderr,"Usage: %s [-D] [-c <config-file>]\n",progname);
   exit(1);
 }
 
@@ -91,7 +91,7 @@ static void parse_arguments(int argc, char **argv)
       t++;
     }
 
-    if ( !strcmp("-d",argv[t]) ) {
+    if ( !strcmp("-D",argv[t]) ) {
       t++;
       run_as_daemon = 1;
     }
@@ -159,6 +159,8 @@ void main(int argc, char **argv)
 
   linedriver = ifax_create_module(IFAX_LINEDRIVER);
   ifax_command(linedriver,CMD_LINEDRIVER_ISDN,ih);
+  ifax_command(linedriver,CMD_LINEDRIVER_AUDIO);
+  ifax_command(linedriver,CMD_LINEDRIVER_RECORD,"isdndump.dat");
 
   fax = initialize_G3fax(linedriver);
 
@@ -176,6 +178,7 @@ void main(int argc, char **argv)
     }
   }
 
+  ifax_command(linedriver,CMD_LINEDRIVER_RECORD,NULL);
   check_stack_usage();
 
   exit(0);

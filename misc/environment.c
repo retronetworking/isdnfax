@@ -5,6 +5,7 @@
    Set up environment for a real-time daemon process like the 'amodemd'
 
    Copyright (C) 1999 Morten Rolland [Morten.Rolland@asker.mail.telia.com]
+   Copyright (C) 1999 Andreas Beck   [becka@ggi-project.org]
   
    Permission is hereby granted, free of charge, to any person obtaining a
    copy of this software and associated documentation files (the "Software"),
@@ -54,10 +55,13 @@ static char *top_used_stack = 0;       /* Top of stack, used a lot */
  * and if possible, initialized (so all memory is mapped).
  */
 
-void initialize_realtime(void)
+int initialize_realtime(void)
 {
   char stack_initialization[TOTAL_STACK_USAGE];
   struct sched_param schedparams;
+  int rc;
+
+  rc=0; /* We assume that all goes well. If not, we will revise that setting. */
 
   /* In order to get predictable response-times, we lock this daemon and
    * its data into RAM, and tell the OS to avoid paging.  The assumed
@@ -70,8 +74,8 @@ void initialize_realtime(void)
     memset(stack_initialization,TOTAL_STACK_USAGE,0);
 
     if ( mlockall(MCL_CURRENT|MCL_FUTURE) != 0 ) {
-      fprintf(stderr,"%s: Can't lock memory\n",progname);
-      exit(1);
+      fprintf(stderr,"%s: Warning - can't lock memory\n",progname);
+      rc|=1; /* was: exit(1); */
     }
 
     bottom_unused_stack = &stack_initialization[0];
@@ -93,9 +97,10 @@ void initialize_realtime(void)
     schedparams.sched_priority = realtime_priority;
     if ( sched_setscheduler((pid_t)0,SCHED_FIFO,&schedparams) < 0 ) {
       fprintf(stderr,"%s: Couldn't enable real-time scheduling\n",progname);
-      exit(1);
+      rc|=2; /* was: exit(1); */
     }
   }
+  return rc;
 }
 
 

@@ -1,7 +1,7 @@
 CFLAGS=-O2 -g -Wall -pedantic -I../include
 
 OBJECTS =	globals.o readconfig.o watchdog.o environment.o \
-		regmodules.o malloc.o isdnline.o
+		regmodules.o malloc.o isdnline.o timers.o softsignals.o
 
 all: misc.a
 

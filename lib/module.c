@@ -100,6 +100,14 @@ int ifax_handle_input(struct ifax_module *self,void *data,size_t len)
 	return self->handle_input(self, data,len);
 }
 
+/* Request data from a module.  Length is specified by the module,
+ * just like the 'handle_input' method.
+ */
+void ifax_handle_demand(struct ifax_module *self, size_t len)
+{
+	self->handle_demand(self,len);
+}
+
 /* Send a command to a module. Note, that commands and data are defined 
  * by the module.
  */

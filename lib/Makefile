@@ -10,4 +10,4 @@ isdnlib.a: $(LIBOBJS)
 	$(AR) rcs $@ $^
 
 clean:
-	rm -f $(LIBOBJS) *~
+	rm -f $(LIBOBJS) isdnlib.a *~

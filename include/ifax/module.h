@@ -27,6 +27,12 @@ typedef struct ifax_module {
 	 */
 	int 	(*handle_input)(struct ifax_module *self, void *data, size_t len);
 
+	/* This function is called to request data from the previous module
+	 * in the chain.  The resulting data is delivered by means of the
+	 * 'handle_input' method.
+	 */
+	void	(*handle_demand)(struct ifax_module *self, size_t len);
+
 	/* Use this to implement "commands" to modules like changing operating
 	 * parameters "on-the-fly".
 	 */
@@ -41,7 +47,13 @@ typedef struct ifax_module {
 	 * Some modules (like replicate.c) have their own ideas about that.
 	 */
 	struct ifax_module	*sendto;
-	
+
+	/* We need a reverse chain as well, to be able to request data from
+	 * from the previous module.  The 'replicate' module and similar
+	 * will have to know which chain to request data from.
+	 */
+	struct ifax_module	*recvfrom;
+
 } ifax_module;
 
 /* A module instance is identified by that handle type.
@@ -82,6 +94,10 @@ ifax_modp ifax_create_module(ifax_module_id what_kind,...);
 /* Send input to a module. Note, that len is defined by the module.
  */
 int ifax_handle_input(struct ifax_module *self,void *data,size_t len);
+
+/* Request data from previous modules.
+ */
+void ifax_handle_demand(struct ifax_module *self, size_t len);
 
 /* Send a command to a module. Semantics are defined by the module.
  */

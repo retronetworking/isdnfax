@@ -1,0 +1,173 @@
+G3 FAX PROTOCOL FOR DUMMIES
+===========================
+
+$Id$
+
+The T.30 standard document being so awfully large and complicated, I have
+found it of great value to assemble some of the most important protocol
+information in this file, and format it according to how my brain works.
+It helps me understand the protocol, and if someone else finds it
+educational as well, so much the better.
+
+Copyright (C) 1999 Morten Rolland [Morten.Rolland@asker.mail.telia.com]
+
+
+Overview
+--------
+
+The two fax-machines wanting to communicate have two different roles:
+
+   1) Called fax-machine
+   2) Calling fax-machine
+
+...which should be rather obvious, but this is imporatant:  During
+the initial negotiation-phase, the roles are determined, and once
+the roles are established, A calling fax-machine can only send
+certain commands, and the called fax-machine can only send certain
+responses.
+
+The actual transfer of information takes place using (at least)
+two modulation standards:
+
+ 1) V.21 Channel 2, 300 bit/s synchronous HDLC for signaling handshakes
+ 2) V.29 7200 bit/s or 9600 bit/s synchronous HDLC for payload data transfers
+
+The first one is called "binary coded signal" in the standard... I will
+call it the "low-speed" transfer; that's what it is.
+
+The second standard is actually a two-way, 4-wire standard used only in
+one direction, the direction of the transfer (which is not always from
+the caller to the called).  Modern faxes can do 14400 bit/s using
+V.17 instead of V.29 - they are conceptually equal with respect to
+what I try to describe in this document, so I will just refer to
+them both as "high-speed" transfers.
+
+Initial negotiation
+-------------------
+
+The initial negotiation may use one of several methods to
+initialize.  I will concentrate on the simple one (no V.8 support):
+
+
+   Calling fax                                                     Called fax
+
+1) ====================== Connection established ============================
+
+2)                                        <---------- Keep quiet 0.2s or more
+
+3) Start sending CNG (Calling tone) ------------>
+
+4)             <---------- Start sending CED (Called terminal identification)
+
+5)                                            <---------- Keep quiet for 75ms
+
+6)                                              <---------- Start sending DIS
+
+Keeping quiet is easy, so is sending CNG and CED:
+
+CNG is used to alarm the other side that a fax-machine is calling, which
+    could be done by having a nice female voice say "This is a fax-call,
+    switch on your fax-machine", but no.  Instead, send a plain ugly
+    sinus signal of 1100 Hz for half a second, then nothing for 3 seconds,
+    and repeat to emphasize.
+
+CED is simpler, but even uglier: Send a steady sinus of 2100 Hz for at
+    least 2.6 seconds, but no more than 4.0 seconds (Ex.: 3.8 seconds).
+
+The DIS is a low-speed transfer of identification data. The V.21
+Channel 2 used for the low-speed transfers uses two frequencies of
+1650 Hz and 1850 Hz to transmit zeroes and ones (very simple stuff,
+standardized in 1964 or something).  The CNG, which is 1100 Hz and
+transmitted in the opposite direction can still be heard by the
+calling party together with the DIS, due to echos.  But since the
+frequencies used by V.21 Channel 2 and 1100 Hz are so far apart,
+they will not interfere with each other and all is well.
+
+The steps above describes the T.30/4.1.1 method of an automatic
+answer sequence (without sophisticated V.8 support).
+
+Initial low-speed messages
+--------------------------
+
+The DIS is just a frame containing identification of abilities of the
+called party, and is encoded just like all other commands/responses
+that uses low-speed transfers.  Actually, during the initial
+negotiation, the DIS may be transfered with two other optional
+identification frames just ahead of it: only the DIS must be present,
+and be sent last.
+
+Some important commands:
+
+     /------------- 0 => Originates from called fax
+     !              1 => Originates from calling fax
+     !
+DIS, 0 000 0001, Digital Identification Signal
+                 Characterizes initial capabilities of called fax.
+                 "I can do this and that, if you want to send me a fax?".
+                 Always sent by the Called party (as seen by the '0').
+
+DTC, 1 000 0001, Digital Transmit Command
+                 Request the called fax to transfer a page to calling fax
+                 "I can do this and that, and you better send me a fax!"
+                 Always sent by the Calling party (as seen by the '1').
+
+DCS, X 100 0001, Digital Command Signal (or Data Coming Soon)
+                 Indicate a high-speed transfer about to start
+                 and identify which modulation it uses etc.
+                 "I hear you... Fax coming up using this and that feature!"
+                 Sent by either calling or called fax, and 'X' is
+                 set accordingly!
+
+Example transfers (beginning of)
+--------------------------------
+
+In a traditional fax transfer from the calling party to the called party,
+we will se the following initial exchange of tones/messages (messages in
+parenthesis are optional):
+
+     Calling fax                                  Called fax
+
+     CNG --------------------->         <--------------- CED
+
+                                        <--- (NSF) (CSI) DIS
+
+     (PWD) (SUB) (TSI) DCS --->
+
+     Training, TCF ===========>
+
+     ...
+
+If the fax transfer is going the other way, from the called party to
+the calling party (You call a fax-machine and fetches a document from
+it - don't ask me how), the following happens:
+
+     Calling fax                                  Called fax
+
+     CNG --------------------->         <--------------- CED
+
+                                        <--- (NSF) (CSI) DIS
+
+     (PWD) (SEP) (CIG) DTC --->
+
+                                        <--------- (TSI) DCS
+
+                                        <===== Training, TCF
+
+     CFR --------------------->
+
+                                        <= Training, FAX-MSG
+
+     ...
+
+The 'Training' part is the first high-speed transfer (indicated
+by a "thicker" arrow).  Training is a fixed signal sent to
+measure and equalize the distortions of the phone-sytem.  The
+first training-only message is used to test which speed can
+be used, and the measured result is sent back with the message
+CFR (Confirmation to Receive).  If things went badly, other
+messages will indicate this.   Upon receiving CFR, the fax
+message is transmitted (in blocks).  The TCF is a string of
+zeroes, lasting 1.5 seconds (If they are received as zeroes,
+all is well and CFR is sent, otherwize FTT to indicate that
+the receiver failed to train.
+

@@ -387,7 +387,8 @@ test_v29demod (void)
   linedriver->sendto = v29demod;
 
   ifax_command (modulator, CMD_GENERIC_INITIALIZE);
-  remaining = 528;/*20260;*/
+  remaining = 1680;
+/*  remaining = 528;*/
   while (remaining > 0)
     {
       remaining -= ifax_command (linedriver, CMD_LINEDRIVER_WORK);

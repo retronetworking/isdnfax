@@ -1,4 +1,3 @@
-
 /*
    ******************************************************************************
 
@@ -7,7 +6,7 @@
 	This is the V.29 demodulator. The module handles the training phase as well
 	as the final data transmission.
 
-   Copyright (C) 1999 Oliver Eichler [oliver.eichler@regensburg.netsurf.de
+   Copyright (C) 1999 Oliver Eichler [oliver.eichler@regensburg.netsurf.de]
 
    Permission is hereby granted, free of charge, to any person obtaining a
    copy of this software and associated documentation files (the "Software"),
@@ -64,6 +63,9 @@
 
 #define		A9600					8
 #define		B9600					15
+#define		C9600					0
+#define		D9600					7
+
 
 #define 		NOSYMB				3
 #define 		NOSAMP				3
@@ -73,8 +75,10 @@
 
 #define		NIL					0x0
 #define 		ESTIMATEGAIN		0x1
-#define		LISTEN				0x2
+#define		SEG2HUNT				0x2
 #define		PHASEHUNT			0x3
+#define		GAINHUNT				0x4
+#define		TRAINEQ				0x5
 
 #define		TAU50
 #undef		TAU30
@@ -86,7 +90,7 @@
 	#define 	AGCESTDLY			30
 	#define 	TAU					0x0432
 #endif
-#define		B						0x7FFF
+#define		B						0x2000
 #define		LEVEL					0x16D6
 #define		LEVEL63				0x0E63
 #define		SQRT_LEVEL63		0x2AE9
@@ -96,27 +100,27 @@
       signed short Re;
       signed short Im;
       unsigned short angl;
+      int	point;
    }
    V29_symbol;
 
-   V29_symbol V29_symb_tbl[] =
-   {
-   {0x4000, 0x0000, DEG0},					/* P=000 Q=0  (0)   */
-   {0x6AAA, 0x0000, DEG0},					/* P=000 Q=1  (0)   */
-   {0x1555, 0x1555, DEG45},				/* P=001 Q=0  (45)  */
-   {0x4000, 0x4000, DEG45},				/* P=001 Q=1  (45)  */
-   {0x0000, 0x4000, DEG90},				/* P=010 Q=0  (90)  */
-   {0x0000, 0x6AAA, DEG90},				/* P=010 Q=1  (90)  */
-   {0xEAAB, 0x1555, DEG135},				/* P=011 Q=0  (135) */
-   {0xC000, 0x4000, DEG135},				/* P=011 Q=1  (135) */
-   {0xC000, 0x0000, DEG180},				/* P=100 Q=0  (180) */
-   {0x9556, 0x0000, DEG180},				/* P=100 Q=1  (180) */
-   {0xEAAB, 0xEAAB, DEG225},				/* P=101 Q=0  (225) */
-   {0xC000, 0xC000, DEG225},				/* P=101 Q=1  (225) */
-   {0x0000, 0xC000, DEG270},				/* P=110 Q=0  (270) */
-   {0x0000, 0x9556, DEG270},				/* P=110 Q=1  (270) */
-   {0x1555, 0xEAAB, DEG315},				/* P=111 Q=0  (315) */
-   {0x4000, 0xC000, DEG315},				/* P=111 Q=1  (315) */
+   V29_symbol V29_symb_tbl[] = {
+   {0x4000, 0x0000, DEG0, 0},					/* P=000 Q=0  (0)   */
+   {0x6AAA, 0x0000, DEG0, 1},					/* P=000 Q=1  (0)   */
+   {0x1555, 0x1555, DEG45, 2},				/* P=001 Q=0  (45)  */
+   {0x4000, 0x4000, DEG45, 3},				/* P=001 Q=1  (45)  */
+   {0x0000, 0x4000, DEG90, 4},				/* P=010 Q=0  (90)  */
+   {0x0000, 0x6AAA, DEG90, 5},				/* P=010 Q=1  (90)  */
+   {0xEAAB, 0x1555, DEG135, 6},				/* P=011 Q=0  (135) */
+   {0xC000, 0x4000, DEG135, 7},				/* P=011 Q=1  (135) */
+   {0xC000, 0x0000, DEG180, 8},				/* P=100 Q=0  (180) */
+   {0x9556, 0x0000, DEG180, 9},				/* P=100 Q=1  (180) */
+   {0xEAAB, 0xEAAB, DEG225, 10},				/* P=101 Q=0  (225) */
+   {0xC000, 0xC000, DEG225, 11},				/* P=101 Q=1  (225) */
+   {0x0000, 0xC000, DEG270, 12},				/* P=110 Q=0  (270) */
+   {0x0000, 0x9556, DEG270, 13},				/* P=110 Q=1  (270) */
+   {0x1555, 0xEAAB, DEG315, 14},				/* P=111 Q=0  (315) */
+   {0x4000, 0xC000, DEG315, 15}				/* P=111 Q=1  (315) */
    }; 
 
    typedef struct
@@ -146,104 +150,157 @@
    int ImMinusTbl[] = {0,1,14,15,12,13,10,11,8,9};
 
 
-   short DCD (short s, V29demod_private * priv);
+   short DigitalCarrierDetect (short s, V29demod_private * priv);
    short Demod (short s, V29demod_private * priv);
    short FindSeq2(V29demod_private * priv);
-   short PhaseHuntSeq2(V29demod_private * priv);
-   short agc_dummy(short s, V29demod_private * priv);
-   short SymbolMapping(V29demod_private * priv);
-   void agc_estimate(V29demod_private *priv);
+   short AdjustPhase(V29demod_private * priv);
+   V29_symbol SymbolMapping(V29demod_private * priv);
+   void EstimateGain(V29demod_private *priv);
+   short InputGain(short s, V29demod_private * priv);
+   void AdjustGain(V29demod_private * priv);
+   void CalcSeg2Ref(V29demod_private * priv);
 
 
-   void
-   V29demod_destroy (ifax_modp self)
+   FILE * fid_re;
+   FILE * fid_im;
+   FILE * fid_sym;
+
+   void V29demod_destroy (ifax_modp self)
    {
    /* V29demod_private *priv=(V29demod_private *)self->private; */
    
+      fclose(fid_re);
+      fclose(fid_im);
+      fclose(fid_sym);
       free (self->private);
    
       return;
    }
 
-   int
-   V29demod_command (ifax_modp self, int cmd, va_list cmds)
+   int V29demod_command (ifax_modp self, int cmd, va_list cmds)
    {
       return 0;			/* Not yet used. */
    }
 
-   int
-   V29demod_handle (ifax_modp self, void *data, size_t length)
+   int V29demod_handle (ifax_modp self, void *data, size_t length)
    {
       V29demod_private *priv = (V29demod_private *) self->private;
       int n;
       short *ps_s = data;
-      static short max = 0;
+      V29_symbol  estSymb;
    
       for (n = 0; n < length; n++)
       {
-      
-         if(max<*ps_s){
-            max = *ps_s;
-            printf("max %i\n",max);
-         }
-      
-         *ps_s = (*ps_s*0x1300)>>15;
-         switch (priv->state)
-         {
+      	/* this gain is only for debugging*/
+         *ps_s = (*ps_s*0x7FFF)>>15;
+         switch (priv->state){
             case NIL:						/* idle and measure power */
-               DCD (*ps_s, priv);
-            
-               ps_s++;
+               DigitalCarrierDetect (*ps_s, priv);
                break;
          
             case ESTIMATEGAIN:			/* estimate initial input gain */
-               DCD (*ps_s, priv);		
-               agc_estimate(priv);
-               ps_s++;
+               DigitalCarrierDetect (*ps_s, priv);		
+               EstimateGain(priv);
                break;
          
-            case LISTEN:					/* try to detect Segment 2 */
-               *ps_s = agc_dummy(*ps_s, priv);
-               DCD (*ps_s, priv);
+            case SEG2HUNT:					/* try to detect Segment 2 */
+               *ps_s = InputGain(*ps_s, priv);
+               DigitalCarrierDetect (*ps_s, priv);
                Demod (*ps_s, priv);
                FindSeq2(priv);
-            
-               ps_s++;
                break;
          
             case PHASEHUNT:				/* synchronize the carrier phase */
-               *ps_s = agc_dummy(*ps_s, priv);
-               DCD (*ps_s, priv);
+               *ps_s = InputGain(*ps_s, priv);
+               DigitalCarrierDetect (*ps_s, priv);
                Demod (*ps_s, priv);
+            	/* 3:1 downsampling */
                if(priv->smpl_cnt == 0){
-                  PhaseHuntSeq2(priv);
-                  SymbolMapping(priv);
+                  priv->smpl_cnt = 3;
+                  estSymb = SymbolMapping(priv);
+                  AdjustPhase(priv);
+               
+                  if(estSymb.angl == priv->current_symbol.angl)
+                     priv->state = GAINHUNT;
+                  fprintf(fid_re,"%i \n",(short)priv->dem_re[priv->dem_index]);
+                  fprintf(fid_im,"%i \n",(short)priv->dem_im[priv->dem_index]);
+                  fprintf(fid_sym,"%i \n",priv->current_symbol.point);
+                  CalcSeg2Ref(priv);
+               }
+            
+               priv->smpl_cnt--;
+               break;
+         
+            case GAINHUNT:				/* fine adjust input gain */
+               *ps_s = InputGain(*ps_s, priv);
+               DigitalCarrierDetect (*ps_s, priv);
+               Demod (*ps_s, priv);
+            	/* 3:1 downsampling */
+               if(priv->smpl_cnt == 0){
+                  priv->smpl_cnt = 3;
+               
+                  estSymb = SymbolMapping(priv);
+               
+                  if(estSymb.point == C9600){
+                     priv->state = TRAINEQ;
+                     priv->current_symbol = V29_symb_tbl[C9600];
+                  }
+                  else{
+                     AdjustPhase(priv);
+                     AdjustGain(priv);
+                     fprintf(fid_re,"%i \n",(short)priv->dem_re[priv->dem_index]);
+                     fprintf(fid_im,"%i \n",(short)priv->dem_im[priv->dem_index]);
+                     fprintf(fid_sym,"%i \n",priv->current_symbol.point);
+                     CalcSeg2Ref(priv);
+                  }
+               }
+               priv->smpl_cnt--;
+               break;
+         
+            case TRAINEQ:			/* seg. 3 equalizer training */
+               *ps_s = InputGain(*ps_s, priv);
+               DigitalCarrierDetect (*ps_s, priv);
+               Demod (*ps_s, priv);
+               /*printf("%04X ",(short)priv->dem_re[priv->dem_index]);
+               printf("%04X \n",(short)priv->dem_im[priv->dem_index]);*/
+            	/* 3:1 downsampling */
+               if(priv->smpl_cnt == 0){
+                  priv->current_symbol = SymbolMapping(priv);
+                  fprintf(fid_re,"%i \n",(short)priv->dem_re[priv->dem_index]);
+                  fprintf(fid_im,"%i \n",(short)priv->dem_im[priv->dem_index]);
+                  fprintf(fid_sym,"%i \n",priv->current_symbol.point);
+                  AdjustPhase(priv);
+                  AdjustGain(priv);
+               
                   priv->smpl_cnt = 3;
                }
             
                priv->smpl_cnt--;
-               ps_s++;
                break;
+         
          }
+      
+         ps_s++;
       }
    
       return 0;
    }
 
 
-   static void
-   V29demod_demand (ifax_modp self, size_t demand)
+   static void V29demod_demand (ifax_modp self, size_t demand)
    {
       V29demod_private *priv = (V29demod_private *) self->private;
    
       return;
    }
 
-   int
-   V29demod_construct (ifax_modp self, va_list args)
+   int V29demod_construct (ifax_modp self, va_list args)
    {
       V29demod_private *priv;
    
+      fid_re = fopen("dem_re.out","wt");
+      fid_im = fopen("dem_im.out","wt");
+      fid_sym = fopen("dem_sym.out","wt");
    
       if (NULL == (priv = self->private = malloc (sizeof (V29demod_private))))
          return 1;
@@ -266,28 +323,40 @@
 
 
 
-   short agc_dummy(short s, V29demod_private * priv)
+   short InputGain(short s, V29demod_private * priv)
    {
       return (s*priv->agc_gain)>>12;
    }
 
-   void agc_estimate(V29demod_private *priv)
+   void EstimateGain(V29demod_private *priv)
    {
       static int cnt;
       long	num;
       short g;
    
       cnt++;
+   	/* tau tabs after digital carrier detect the measured power
+   		should be 63% of the final power. A good time to estimate
+   		the initial input gain factor. */
       if(cnt == AGCESTDLY){
-         num = intsqrt(LEVEL63);
-         num <<= 12;
+         num = SQRT_LEVEL63<<12;
          g = num/intsqrt(priv->power);
          priv->agc_gain = g;
          printf("I would guess gain is %04X\n", g);
-         priv->state = LISTEN;
+         priv->state = SEG2HUNT;
       }
-   
    }
+
+   void AdjustGain(V29demod_private * priv)
+   {
+      short e;
+   	/* we know the symbol - we know the needed gain */
+      e = priv->current_symbol.Re - priv->dem_re[priv->dem_index];
+      e = (e * B) >> 18;
+      priv->agc_gain -= e;
+      printf("agc gain: %04X\n",priv->agc_gain);
+   }
+
    short Demod (short s, V29demod_private * priv)
    {
       static int cnt = 0;
@@ -356,7 +425,7 @@
    }
 
 
-   short SymbolMapping(V29demod_private * priv)
+   V29_symbol SymbolMapping(V29demod_private * priv)
    {
       short re = priv->dem_re[priv->dem_index];
       short im = priv->dem_im[priv->dem_index];
@@ -399,7 +468,16 @@
       if(im < 0) point = ImMinusTbl[point];
    
       printf("%i\n",point);
-      return 0;
+      return V29_symb_tbl[point];
+   }
+
+   void CalcSeg2Ref(V29demod_private * priv)
+   {
+      if(priv->current_symbol.angl == DEG180){
+         priv->current_symbol = V29_symb_tbl[B9600];	
+      }
+      else
+         priv->current_symbol = V29_symb_tbl[A9600];
    }
 
    short 
@@ -490,41 +568,21 @@
       return res;
    }
 
-   short 
-   PhaseHuntSeq2(V29demod_private * priv)
+   short AdjustPhase(V29demod_private * priv)
    {
-      short e;
-      static int cnt = 0;
-   
      	/* adjust phi by the current phase difference */
       priv->phi += 
          priv->current_symbol.angl - 
          priv->dem_angl[priv->dem_index];
-      /*printf("0x%04X\n",priv->dem_re[priv->dem_index]);*/
-     	/* toggle symbol */
-      if(priv->current_symbol.angl == DEG180){
-         if(cnt > 10){
-            e = priv->current_symbol.Re - priv->dem_re[priv->dem_index];
-            /*printf("%04X ",e);*/
-            e = (e * B) >> 18;
-            priv->agc_gain -= e;
-            printf("agc gain: %04X\n",priv->agc_gain);
-         }
-         cnt++;
-         priv->current_symbol = V29_symb_tbl[B9600];	
-      }
-      else
-         priv->current_symbol = V29_symb_tbl[A9600];
    
       return 0;
    }
 
-   short
-   DCD (short s, V29demod_private * priv)
+   short DigitalCarrierDetect (short s, V29demod_private * priv)
    {
       int s_s;
    
-   /* Power Measurement   s_s = a*(s[n] ) + s_s[n-1]*(1-a) */
+   	/* Power Measurement   s_s = a*(s[n] ) + s_s[n-1]*(1-a) */
    
       s_s = (s * s) >> 15;
       s_s = s_s - priv->power;

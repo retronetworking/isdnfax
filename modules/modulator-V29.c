@@ -431,8 +431,10 @@
             
                modulate_single_symbol(self,priv,Re,Im);
                priv->syncseq++;
+/*
                if(priv->syncseq == SYNCHRONIZE_START_SEG2 + 2)
                   priv->syncseq = SYNCHRONIZE_START_SEG2;
+*/
                symbols_needed--;
             
             } 

@@ -9,3 +9,4 @@ g3.a: $(OBJECTS)
 
 clean:
 	rm -f $(OBJECTS) g3.a *~
+

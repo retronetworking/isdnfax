@@ -118,5 +118,5 @@ void fax_prepare_incomming(struct G3fax *fax)
 
 void fax_prepare_outgoing(struct G3fax *fax)
 {
-  /* fax_initialize_fsm_outgoing(fax); */
+  /* fax_initialize_fsm_outgoing(); */
 }

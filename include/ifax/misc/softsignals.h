@@ -27,8 +27,14 @@
 */
 
 #include <ifax/types.h>
+#include <ifax/misc/timers.h>
 
 #define MAX_SOFTSIGNALS 64
+/*defining soft signals, the smallest number must be graether then MAX_TIMERS
+defined in include/ifax/misc/timers.h */
+
+#define CED 0 + MAX_TIMERS
+
 
 extern void softsignal(int);
 extern void reset_softsignals(void);

@@ -217,31 +217,20 @@ DEFSTATE(A_CNG_sound)
 DEFSTATE(A_CNG_silence)
 DEFSTATE(entry_PhaseB)
 
-void initialize_fsm_sending(struct G3fax *fax)
+void fax_initialize_fsm_outgoing()
 {
-  fax->fsm = start_sending_fax;
-  fax_run_internals(fax);
+
+  initialize_statemachines();                /* Reset all state-machines for a fresh start */
+  init_fsm(FSM_FAX_MAIN,start_sending_fax);  /* Get the main one going */
+  ifax_connect(fax->silence,fax->rateconv7k2to8k0);  /* Start off silent of CNG*/
+
 }
 
 STATE (start_sending_fax)
 { 
-  dial_isdn (number);
-  fax->fsm = con_established;
-  one_shot_timer(TIMER_DIAL, THIRTYFIFESECONDS);
+  one_shot_timer(TIMER_DIAL, THIRTYFIVESECONDS);
   one_shot_timer(TIMER_AUX, THREESECONDS);
-}
-
-STATE (con_established)
-{
-  if (conected) {
-  fax->fsm = A_CNG_sound;   
-  one_shot_timer(TIMER_AUX, ZEROPOINTFIFESECONDS);
-  return;
-  }
-  if () {
-    return_from_subroutine (fax);
-    return;
-  }
+  fsmself->state = A_CNG_sound;
 }
 
 STATE (A_CNG_silence)
@@ -249,11 +238,11 @@ STATE (A_CNG_silence)
   if ( softsignaled(TIMER_AUX) ) {
     ifax_connect(fax->sinusCNG,fax->rateconv7k2to8k0);
     one_shot_timer(TIMER_AUX, ZEROPOINTFIFESECONDS);
-    fax->fsm = A_CNG_sound;   
+    fsmself->state = A_CNG_sound;
     return;
   }
   if (softsignaled (CED)) {
-    fax->fsm = entry_PhaseB;
+    fsmself->state = entry_PhaseD;  // should entry_PhaseB
     return;
   }
   if (softsignaled(TIMER_DIAL)) {
@@ -268,11 +257,11 @@ STATE (A_CNG_sound)
   if ( softsignaled(TIMER_AUX) ) {
     ifax_connect(fax->silence,fax->rateconv7k2to8k0);
     one_shot_timer(TIMER_AUX, THREESECONDS);
-    fax->fsm = A_CNG_silence;   
+    fsmself->state = A_CNG_silence;
     return;
   }
   if (softsignaled (CED)) {
-    fax->fsm = entry_PhaseB;
+    fsmself->state = entry_PhaseD;  // should entry_PhaseB
     return;
   }
   if (softsignaled(TIMER_DIAL)) {
@@ -282,7 +271,7 @@ STATE (A_CNG_sound)
   }
 }
 
-
+//#if 0
 /****************************************************************************
  *
  *  Phase B, FIGURE 5-2a/T.30
@@ -303,11 +292,11 @@ STATE (B_CNG_silence)
   if ( softsignaled(TIMER_AUX) ) {
     ifax_connect(fax->sinusCNG,fax->rateconv7k2to8k0);
     one_shot_timer(TIMER_AUX, ZEROPOINTFIFESECONDS);
-    fax->fsm = B_CNG_sound;   
+    fsmself->state = B_CNG_sound;
     return;
   }
   if (softsignaled_clr(DIS_RECEIVED) || softsignaled_clr (DTC_RECEIVED)) {
-    fax->fsm = entry_PhaseB;
+    fsmself->state = entry_PhaseB;
     return;
   }
   if (softsignaled(T1)) {
@@ -322,11 +311,11 @@ STATE (B_CNG_sound)
   if ( softsignaled(TIMER_AUX) ) {
     ifax_connect(fax->silence,fax->rateconv7k2to8k0);
     one_shot_timer(TIMER_AUX, THREESECONDS);
-    fax->fsm = B_CNG_silence;   
+    fsmself->state = B_CNG_silence;
     return;
   }
   if (softsignaled_clr(DIS_RECEIVED) || softsignaled_clr (DTC_RECEIVED)) {
-    fax->fsm = entry_PhaseB;
+    fsmself->state = entry_PhaseB;
     return;
   }
   if (softsignaled(T1)) {
@@ -381,14 +370,14 @@ DEFSTATE(response_received_disconnect)
 STATE(response_received)
 {
   one_shot_timer(TIMER_T4,THREESECONDS);
-  fax->fsm = response_received_flag;
+  fsmself->state = response_received_flag;
 }
 
 STATE(response_received_flag)
 {
   if ( softsignaled_clr(HDLCFLAGDETECTED) ) {
     one_shot_timer(TIMER_SHUTUP,THREESECONDS);
-    fax->fsm = response_received_RAF;
+    fsmself->state = response_received_RAF;
   }
   if ( softsignaled(TIMER_T4) ) {
     softsignal_set(RESPONSERECEIVED_RESULT,0);
@@ -403,17 +392,17 @@ STATE(response_received_raf)
     fax_decode_controlmsg(fax);
 
     if ( fax->FCSerror || fax->ctrlmsg == MSG_CRP ) {
-      fax->fsm = response_received_sg2;
+      fsmself->state = response_received_sg2;
       return;
     }
 
     if ( fax->ctrlmsg == MSG_DCN ) {
-      fax->fsm = response_received_disconnect;
+      fsmself->state = response_received_disconnect;
       return;
     }
 
     if ( process_optional_response(fax) ) {
-      fax->fsm = response_received_flag;
+      fsmself->state = response_received_flag;
       return;
     }
 
@@ -428,18 +417,18 @@ STATE(response_received_raf)
 
   if ( softsignaled(V21CARRIEROK) ) {
     if ( softsignaled(TIMER_SHUTUP) ) {
-      fax->fsm = response_received_tdcn;
+      fsmself->state = response_received_tdcn;
     }
   }
 
   one_shot_timer(TIMER_AUX,ZEROPOINTTWOSECONDS);
-  fax->fsm = response_received_sg1;
+  fsmself->state = response_received_sg1;
 }
 
 STATE(response_received_sg1)
 {
   if ( softsignaled(V21CARRIEROK ) ) {
-    fax->fsm = response_received_raf;
+    fsmself->state = response_received_raf;
     return;
   }
 
@@ -453,18 +442,18 @@ STATE(response_received_sg2)
 {
   if ( softfignaled(V21CARRIEROK) ) {
     if ( softsignaled(TIMER_SHUTUP) )
-      fax->fsm = response_received_tdcn;
+      fsmself->state = response_received_tdcn;
     return;
   }
 
   one_shot_timer(TIMER_AUX,ZEROPOINTTWOSECONDS);
-  fax->fsm = response_received_sg2_helper;
+  fsmself->state = response_received_sg2_helper;
 }
 
 STATE(response_received_sg2_helper)
 {
   if ( softsignaled(V21CARRIEROK) ) {
-    fax->fsm = response_received_sg2;
+    fsmself->state = response_received_sg2;
     return;
   }
 
@@ -477,7 +466,7 @@ STATE(response_received_sg2_helper)
 STATE(response_received_tdcn)
 {
   /* Transmit a disconnect line command */
-  fax->fsm = response_received_disconnect;
+  fsmself->state = response_received_disconnect;
 }
 
 STATE(response_received_disconnect)
@@ -511,14 +500,14 @@ DEFSTATE(command_received_disconnect)
 
 
 STATE (command_received){
-  fax->fsm = command_received_flag;
+  fsmself->state = command_received_flag;
 }
 
 STATE (command_received_flag)
 {
   if ( softsignaled_clr(HDLCFLAGDETECTED) ) {
     one_shot_timer(TIMER_T2,SIXSECONDS); ?????
-    fax->fsm = command_received_RAF;
+    fsmself->state = command_received_RAF;
   }
   else {
     softsignal_clr(COMMANDRECEIVED_RESULT);
@@ -536,17 +525,17 @@ STATE (command_received_raf) {
     if ( fax->FCSerror) {
       one_shot_timer(TIMER_SHUTUP,THREESECONDS);
       one_shot_timer(TIMER_AUX,ZEROPOINTTWOSECONDS);
-      fax->fsm = command_received_sg2;
+      fsmself->state = command_received_sg2;
       return;
     }
 
     if ( fax->ctrlmsg == MSG_DCN ) {
-      fax->fsm = command_received_disconnect;
+      fsmself->state = command_received_disconnect;
       return;
     }
 
     if ( process_optional_command(fax) ) {
-      fax->fsm = command_received_flag;
+      fsmself->state = command_received_flag;
       return;
     }
 
@@ -557,7 +546,7 @@ STATE (command_received_raf) {
   else {
     one_shot_timer(TIMER_SHUTUP,THREESECONDS);
     one_shot_timer(TIMER_AUX,ZEROPOINTTWOSECONDS);
-    fax->fsm = command_received_sg1;
+    fsmself->state = command_received_sg1;
   }
 }
 
@@ -579,7 +568,7 @@ STATE(command_received_sg1) {
       return_from_subroutine(fax);
     }
     else {
-      fax->fsm = command_received_raf;
+      fsmself->state = command_received_raf;
     }
   }
 }
@@ -591,12 +580,12 @@ STATE(command_received_sg2) {
     if ( softsignaled(TIMER_AUX) ) {  // 0.2 seconds
       if (CRP option)
         Response CRP;
-      fax->fsm = command_received_raf;
+      fsmself->state = command_received_raf;
     }
   }
   else
     if ( softsignaled (TIMER_SHUTUP)) {
-      fax->fsm = command_received_disconnect;
+      fsmself->state = command_received_disconnect;
     }
   }
 }
@@ -608,5 +597,14 @@ STATE(command_received_disconnect)
   softsignal(ACTION_HANGUP);
   return_from_subroutine(fax);
 }
+
+
+/****************************************************************************
+ *
+ *  Phase D, FIGURE 5-2c/T.30
+ *
+ *  State-machine for phase D of transmitting terminal
+ */
+
 
 #endif

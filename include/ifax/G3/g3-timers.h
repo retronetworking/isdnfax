@@ -29,3 +29,5 @@
 
 #define TIMER_AUX         6
 #define TIMER_DIAL        7
+
+/*the last is MAX_TIMERS - 1 defined in include/ifax/misc/timers.h*/

@@ -30,4 +30,3 @@
 
 extern void fax_initialize_fsm_incomming(void);
 extern void fax_initialize_fsm_outgoing(void);
-extern void fax_initialize_fsm_sending(void);

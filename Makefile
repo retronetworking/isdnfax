@@ -3,7 +3,7 @@ CFLAGS=-O2 -g -Wall -pedantic -Iinclude
 
 SUBDIRS = lib modules misc
 
-MODULES = modules/modules.a lib/isdnlib.a misc/misc.a
+MODULES = misc/misc.a modules/modules.a lib/isdnlib.a
 
 PROGRAMS = v21_softmodem test amodemd
 
@@ -19,7 +19,7 @@ test:	test.o $(OBJECTS) $(MODULES)
 	$(CC) -o $@ $^ $(LDFLAGS)
 
 amodemd:	amodemd.o $(MODULES)
-		$(CC) -o $@ $^ $(LDFLAGS) 
+		$(CC) -o $@ $^ $(LDFLAGS)
 
 misc/misc.a: misc/*.o
 	make -C misc

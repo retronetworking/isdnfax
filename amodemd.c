@@ -4,7 +4,7 @@
    Fax program for ISDN.
    Initial startup of daemon 'amodemd' - contains main() etc.
 
-   Copyright (C) 1998 Morten Rolland [Morten.Rolland@asker.mail.telia.com]
+   Copyright (C) 1999 Morten Rolland [Morten.Rolland@asker.mail.telia.com]
 
    Permission is hereby granted, free of charge, to any person obtaining a
    copy of this software and associated documentation files (the "Software"),
@@ -38,12 +38,19 @@
 #include <strings.h>
 #include <unistd.h>
 #include <sys/types.h>
+#include <sys/time.h>
 
+#include <ifax/ifax.h>
 #include <ifax/misc/globals.h>
 #include <ifax/misc/readconfig.h>
 #include <ifax/misc/environment.h>
 #include <ifax/misc/watchdog.h>
+#include <ifax/misc/regmodules.h>
+#include <ifax/misc/isdnline.h>
+#include <ifax/modules/linedriver.h>
 
+
+static struct IsdnHandle *ih;
 
 /* Parse command-line arguments and bail out with an error message if
  * something is wrong.
@@ -86,12 +93,45 @@ static void parse_arguments(int argc, char **argv)
   }
 }
 
+static void select_wait(void)
+{
+  fd_set rfd;
+  struct timeval delay;
+
+  FD_ZERO(&rfd);
+  FD_SET(ih->fd,&rfd);
+
+  delay.tv_sec = 0;
+  delay.tv_usec = 20000;
+
+  select(ih->fd+1, &rfd, (fd_set *)0, (fd_set *)0, &delay);
+}
+
+static void setup_incomming(void)
+{
+  reset_timers();
+  fax_prepare_incomming();
+}
+
+static void handle_call(void)
+{
+  int samples;
+
+  for (;;) {
+    select_wait();
+    samples = ifax_command(linedriver,CMD_LINEDRIVER_WORK);
+    if ( samples < 0 )
+      break;
+    decrease_timers(samples);
+  }
+}
+
 
 /* Startup point for 'amodemd' - parse args, initialize and off we go */
 
 void main(int argc, char **argv)
 {
-  int t;
+  int x;
 
   parse_arguments(argc,argv);
   read_configuration_file();
@@ -104,20 +144,30 @@ void main(int argc, char **argv)
     reset_watchdog_timer();
   }
 
-  /* Next up is:
-   *      initialize_fax();
-   * and later maybe:
-   *      initialize_v34();
-   * ...
-   */
+  register_modules();
+
+  initialize_fax();
+
+  /* Start slave I/O and interface process here when available... */
+
+  ih = IsdnInit(isdn_device,isdn_msn);
+
+  linedriver = ifax_create_module(IFAX_LINEDRIVER);
+  ifax_command(linedriver,CMD_LINEDRIVER_ISDN,ih);
 
   initialize_realtime();
 
-  /*  main_loop(); */
-
-  /* Waste some cycles to test watchdog timer.... */
-  for ( t=0; t < 1000000000; t++ )
-    ;
+  while ( ! ih->error ) {
+    /* ISDN-line ok, do work */
+    select_wait();
+    x = IsdnService(ih);
+    if ( x == ISDN_RINGING ) {
+      if ( IsdnAnswer(ih) ) {
+	setup_incomming();
+	handle_call();
+      }
+    }
+  }
 
   check_stack_usage();
 

@@ -80,7 +80,7 @@ struct G3fax *initialize_G3fax(ifax_modp linedriver)
   /* The initial simple establishment phase (no V.8 involved) uses just
    * a few sinus signals.  The sinus-signal generators are initialized
    * onse and for all and brought online when needed for the CNG and CED
-   * signals.
+   * signals.  The silence generator is used during periods of silence.
    */
 
   fax->sinusCNG = ifax_create_module(IFAX_SIGNALGEN);
@@ -91,6 +91,13 @@ struct G3fax *initialize_G3fax(ifax_modp linedriver)
 
   fax->silence = ifax_create_module(IFAX_SIGNALGEN);
   ifax_command(fax->silence,CMD_SIGNALGEN_SINUS,7200,440,0);
+
+  /* The HDLC-encode is used both by the "binary coded signal"
+   * and high-speed fax transfers.
+   */
+
+  fax->encoderHDLC = ifax_create_module(IFAX_ENCODER_HDLC);
+
 
   ifax_connect(fax->rateconv7k2to8k0,linedriver);
 

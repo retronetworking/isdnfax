@@ -41,12 +41,14 @@
 #include <ifax/G3/g3-timers.h>
 #include <ifax/misc/timers.h>
 #include <ifax/misc/softsignals.h>
+#include <ifax/modules/hdlc-framing.h>
 
 
 /* All timing is done in units of 1/8000 seconds (one ISDN-sample) */
 
 #define SEVENTYFIVEMILLISECONDS                600
 #define ZEROPOINTTWOSECONDS                   1600
+#define ONESECOND                             8000
 #define THREEPOINTEIGHTSECONDS               30400
 
 
@@ -91,7 +93,9 @@ void simple_wait(struct G3fax *fax, ifax_sint32 delay,
 DEFSTATE(start_answer_incomming)
 DEFSTATE(do_CED)
 DEFSTATE(done_CED)
+DEFSTATE(start_DIS)
 DEFSTATE(do_DIS)
+DEFSTATE(done_DIS)
 
 
 /* Jump to 'start_answering_call' when an incomming call is
@@ -124,14 +128,26 @@ STATE(done_CED)
 {
   /* After the CED, wait 75ms and do the DIS */
   ifax_connect(fax->silence,fax->rateconv7k2to8k0);
-  simple_wait(fax,SEVENTYFIVEMILLISECONDS,do_DIS);
+  simple_wait(fax,SEVENTYFIVEMILLISECONDS,start_DIS);
+}
+
+STATE(start_DIS)
+{
+  ifax_connect(fax->modulatorV21,fax->rateconv7k2to8k0);
+  ifax_connect(fax->encoderHDLC,fax->modulatorV21);
+  fax->fsm = do_DIS;
+  simple_wait(fax,ONESECOND,do_DIS);
 }
 
 STATE(do_DIS)
 {
-  /* Naah, we need some more modules first... */
+  ifax_command(fax->encoderHDLC,CMD_FRAMING_HDLC_TXFRAME,"heisann!",8,255);
+  fax->fsm = done_DIS;
 }
 
+STATE(done_DIS)
+{
+}
 
 
 
@@ -151,7 +167,7 @@ STATE(do_DIS)
  *  occours, like the remote transmitting more than it is allowed to,
  *  a hangup is performed.
  *
- *  By calling the 'invoke_subroutine' on the state 'response_received',
+ *  By doing 'call_subroutine' on the state 'response_received',
  *  the answer will be available in RESPONSERECEIVED_RESULT .
  */
 

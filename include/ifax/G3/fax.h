@@ -40,6 +40,7 @@ struct G3fax {
   ifax_modp scrambler;
   ifax_modp modulatorV21;
   ifax_modp modulatorV29;
+  ifax_modp encoderHDLC;
   void (*fsm)(struct G3fax *);
   void (*simple_wait_next_state)(struct G3fax *);
 };

@@ -1,5 +1,11 @@
 Changelog:
 ----------
+
+99-09-04 [morten]:
+	* CVS repository now hosted on cvs.isdn4linux.de instead of
+	  oldhades.think.de.  This entery is basically a test that it
+	  works.
+
 99-08-29 [morten]:
 	* Changed fsk_demod to properly use its lookuptables (alaw problem)
 	* Updated G3/commandframes.c to produce valid frames

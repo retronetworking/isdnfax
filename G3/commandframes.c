@@ -30,6 +30,7 @@
 #include <ifax/types.h>
 #include <ifax/G3/fax.h>
 #include <ifax/G3/commandframes.h>
+#include <ifax/misc/readconfig.h>
 
 
 /* Helper function to assign individual bits in a command frame.  The
@@ -61,8 +62,10 @@ void assignfield(void *start, int bitpos, int fieldsize, int fieldvalue)
 {
   int t;
 
-  for ( t = fieldsize; t > 0 ; t-- )
-    assignbit(start, bitpos+t-1, fieldvalue & 1);
+  for ( t = fieldsize; t > 0; t-- ) {
+    assignbit(start, bitpos+t-1, fieldvalue);
+    fieldvalue >>= 1;
+  }
 }
 
 
@@ -70,18 +73,35 @@ void assignfield(void *start, int bitpos, int fieldsize, int fieldvalue)
 
 void fax_setup_outgoing_DIS(void)
 {
-  memset(fax->DIS,0,10);    /* Start with 0's, most unused values are zero */
-  assignfield(fax->DIS,11,4,0x08); /* Data signaling rate = V.29 */
-  assignbit(fax->DIS,16,1); /* Two dimentional coding capability */
+  /* The DIS is 'Digital Identification Signal' identifying the
+   * capabilities of the remote fax machine (size of paper,
+   * resolution, speed of paper, modulation supported etc.)
+   */
+  int start = 16;
+  memset(fax->DIS,0,10);                           /* Default to 0's */
+  assignfield(fax->DIS,1,8,FAX_CNTL_LAST_FRAME);   /* Last frame is sequence */
+  assignfield(fax->DIS,9,8,FAX_FCF_DIS);           /* This is DIS */
+  assignbit(fax->DIS,start+10,1);        /* We can receive faxes (no? :-) */
+  assignfield(fax->DIS,start+11,4,0x08); /* Data signaling rate: V.29 */
+  assignbit(fax->DIS,start+15,1);        /* We can do 200 dpi */
+  assignfield(fax->DIS,start+19,2,0x01); /* Unlimited paper length */
+  assignfield(fax->DIS,start+21,3,0x07); /* Very fast reception (0.0ms/line) */
+  assignbit(fax->DIS,start+24,1);        /* Extend field, bits 17-24 */
 
-  fax->DISsize = 10;
-
-  /* Very preliminary DIS... but it may suffice for now */
+  fax->DISsize = 6;
 }
 
 void fax_setup_outgoing_CSI(void)
 {
-  fax->CSIsize = 0;
+  /* The CSI is 'Called Subscriber Identifier' which is shown on the
+   * calling fax-machine and in its log.  It is a 20 characters string
+   * containing digits and '+'.
+   */
+  memset(fax->CSI,' ',22);
+  assignfield(fax->CSI,1,8,FAX_CNTL_NONLAST_FRAME);
+  assignfield(fax->CSI,9,8,FAX_FCF_CSI);
+  strncpy(((char*)fax->CSI)+2,subscriber_id,strlen(subscriber_id));
+  fax->CSIsize = 22;
 }
 
 void fax_setup_outgoing_NSF(void)

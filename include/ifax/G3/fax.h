@@ -51,4 +51,13 @@ struct G3fax {
 
 extern struct G3fax *fax;
 
+/* Control octet; 1st octet of frame */
+#define FAX_CNTL_NONLAST_FRAME       0xC0
+#define FAX_CNTL_LAST_FRAME          0xC8
+
+/* Facsimile Control Field (FCF); 2nd octet of frame */
+#define FAX_FCF_DIRECTION            0x80
+#define FAX_FCF_DIS                  0x01
+#define FAX_FCF_CSI                  0x02
+
 #endif

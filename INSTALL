@@ -1,0 +1,57 @@
+Welcome to isdnfax.
+-------------------
+
+1. Introduction:
+----------------
+
+Isdnfax is a project aimed at providing a fax transmission and reception 
+system via the audio capabilities of ISDN4Linux or other similar systems.
+
+Note, that this is ALPHA software, not certified by anyone, and comes
+without warranty of any kind, express or implied.
+
+CAVEAT EMPTOR. This software _should_ transmit data between ISDN4Linux
+and remote modems/faxes, _but_ it might as well set them on fire, take down
+the public telephone network or whatever.
+The developers are in no respect reliable for any damage arising from the
+use or inability to use of this software.
+
+See the file COPYING for details on licensing and warranty.
+
+2. Building:
+------------
+
+2.1. Downloading and unpacking:
+-------------------------------
+
+You have already done that - else you wouldn't be reading this.
+
+2.2. Configuring:
+-----------------
+
+No compiletime configuration is currently available. This may change.
+Watch for updates.
+
+2.3. Compiling:
+---------------
+
+Just type "make". Should do it all.
+
+2.4. Running:
+-------------
+
+The following programs are currently available:
+
+2.4.1. v21_softmodem:
+---------------------
+
+Emulate a V.21 (300 Baud) modem via the ISDN4Linux audio layer.
+
+Usage: ./v21_softmodem -i /dev/ttyI[0-9] -m MY_MSN -c NUMBER_TO_CALL
+
+The program is currently originate-only.
+
+Have fun,
+
+Andreas Beck 
+<becka@ggi-project.org>

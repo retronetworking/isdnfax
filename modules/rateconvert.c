@@ -32,8 +32,8 @@
  * Parameters are:
  *      int       upsample factor
  *      int       downsample factor
- *      short *   filter coeficients
  *      int       size of filter
+ *      short *   filter coeficients
  *      int       scale output (0x10000 is unit scale)
  *
  * Filtersize must be an integer multiple of upsample-factor.
@@ -122,7 +122,7 @@ int rateconvert_handle(ifax_modp self, void *data, size_t length)
 
       temp = sum >> 15;
       sum = temp * priv->scale;
-      temp = sum >> 15;
+      temp = sum >> 16;
       
       priv->buffer[bp++] = temp;
 
@@ -167,7 +167,6 @@ int rateconvert_command(ifax_modp self, int cmd, va_list cmds)
 int rateconvert_construct(ifax_modp self, va_list args )
 {
   rateconvert_private *priv;
-  /* va_list args; */
   int t, k, n, decimate;
   signed short *filtercoef, *dp, *sp;
 
@@ -178,18 +177,19 @@ int rateconvert_construct(ifax_modp self, va_list args )
   self->handle_input = rateconvert_handle;
   self->command = rateconvert_command;
 
-  /* va_start(args,self); */
   priv->upfactor = va_arg(args,int);
   priv->downfactor = va_arg(args,int);
   priv->filtersize = va_arg(args,int);
   filtercoef = va_arg(args,short *);
   priv->scale = va_arg(args,signed int);
-  /* va_end(args); */
 
   /* Find size of subfilter, and fail if not proper */
   priv->subfiltsize = priv->filtersize / priv->upfactor;
-  if ( (priv->subfiltsize * priv->upfactor) != priv->filtersize )
+  if ( (priv->subfiltsize * priv->upfactor) != priv->filtersize ) {
+    printf("Filter-size %d incompatible with upsampe %d\n",
+	    priv->filtersize,priv->upfactor);
     return 1;
+  }
 
   if ( (priv->data=malloc(sizeof(*priv->data)*priv->subfiltsize)) == 0 )
     return 1;

@@ -3,6 +3,9 @@
  * (c) 1998 Andreas Beck	<becka@ggi-project.org>
  */
 
+#ifndef _IFAX_DEBUG_H
+#define _IFAX_DEBUG_H
+
 enum debuglevel {
 	DEBUG_ALL,
 	DEBUG_JUNK,
@@ -19,3 +22,5 @@ enum debuglevel {
 int  ifax_dprintf(enum debuglevel severity,char *format,...);
 
 void ifax_debugsetlevel(enum debuglevel);
+
+#endif

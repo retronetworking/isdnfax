@@ -58,8 +58,9 @@
 
    int	debug_handle(ifax_modp self, void *data, size_t length)
    {
-      unsigned char *dat=data;
-      signed short *s16 = data;
+      ifax_uint8 *dat = data;
+      ifax_sint16 *s16 = data;
+      ifax_uint8 *u8 = data, mask = 1;
       int handled=0;
       int x;
       FILE *file;
@@ -99,6 +100,15 @@
                case DEBUG_FORMAT_16BIT_HEX:
                   fprintf(file,"0x%04x\n",((signed int)(*s16++))&0xffff);
                   break;
+	       case DEBUG_FORMAT_PACKED_BINARY:
+		 fprintf(file,"%c",((*u8)&mask)?'1':'0');
+		 if ( mask == 0x80 ) {
+		   mask = 1;
+		   u8++;
+		 } else {
+		   mask <<= 1;
+		 }
+		 break;
                default:
                   fprintf(stderr,"Bad DEBUG_FORMAT_*\n");
                   exit(1);

@@ -480,10 +480,10 @@ void produce_bits(encoder_hdlc_private *priv)
   }
 
   /* Fetch the next byte to be transmitted, and compute FCS */
-  next = (*priv->src++ & 0x00ff);
+  next = (*priv->src++) & 0x00ff;
   next_size = 8;
   priv->remaining_bytes--;
-  priv->fcs = (priv->fcs>>8) ^ hdlc_fcs_lookup[(priv->fcs&0xff)^next];
+  priv->fcs = (priv->fcs>>8) ^ hdlc_fcs_lookup[(priv->fcs ^ next) & 0xff];
 
   /* Advance to next phase if current phase exhausted */
   if ( priv->remaining_bytes == 0 ) {
@@ -499,8 +499,9 @@ void produce_bits(encoder_hdlc_private *priv)
 	priv->phase = FCS;
 	priv->src = &priv->fcs_tx[0];
 	priv->remaining_bytes = 2;
-	priv->fcs_tx[0] = ~(priv->fcs & 0xff);
-	priv->fcs_tx[1] = ~((priv->fcs>>8) & 0xff);
+	priv->fcs ^= 0xffff;
+	priv->fcs_tx[0] = priv->fcs & 0xff;
+	priv->fcs_tx[1] = (priv->fcs>>8) & 0xff;
 	break;
 
       case FCS:

@@ -33,15 +33,6 @@ int IsdnOpenDevice(char *device)
 		return -1;
 	}
 
-#if 0
-	/* What is this?  Is it needed? */
-	if ( fcntl(isdnfd, F_SETFL, O_RDWR) < 0 ) {
-		sprintf(isdnerr,"...");
-		close(isdnfd);
-		return -1;
-	}
-#endif
-
 	if ( tcgetattr(isdnfd,&isdnsetting) < 0 ) {
 		sprintf(isdnerr,"Unable to read terminal settings for '%s'",device);
 		close(isdnfd);
@@ -78,7 +69,7 @@ void IsdnPrintChar(char *what, char c)
   if ( c == '\r' ) strcpy(tmp,"'\\r'");
   if ( c == '\n' ) strcpy(tmp,"'\\n'");
 
-  fprintf(stderr,"<%s: %s>\n",what,tmp);
+  ifax_dprintf(DEBUG_INFO,"<%s: %s>\n",what,tmp);
 }
 
 
@@ -88,12 +79,10 @@ void IsdnReadLine(int isdnfd, char *buf,int size)
 
   skipcrlf = 1;
 
-  fprintf(stderr,"---------------------------------------------\n");
-
   for ( t=0; t < size; t++ ) {
     r = read(isdnfd,&buf[t],1);
     if ( r != 1 ) {
-      fprintf(stderr,"Read audio-data errno: %d\n",errno);
+      ifax_dprintf(DEBUG_INFO,"Read audio-data errno: %d\n",errno);
       sprintf(isdnerr,"Can't read device one byte at a time");
       buf[t] = 0;
       return;
@@ -155,7 +144,7 @@ int IsdnCommand(int isdnfd, char *cmd, int checho, int result)
 
   if ( result ) {
     IsdnReadLine(isdnfd, cmdresult,CMDRESULTSIZE);
-    fprintf(stderr,"Command '%s' resulted in '%s'\n",localcmd,cmdresult);
+    ifax_dprintf(DEBUG_INFO,"Command '%s' resulted in '%s'\n",localcmd,cmdresult);
   }
 
   return 1;
@@ -192,14 +181,14 @@ void IsdnReadAudio(int isdnfd, unsigned char *data, int size)
 		data[t] = '@';
 		if ( read(isdnfd,&data[t],1) != 1 ) 
 		{
-			fprintf(stderr,"Oops: %d\n",errno);
+			ifax_dprintf(DEBUG_INFO,"Oops: %d\n",errno);
 		}
 		if ( data[t] == 0x10 ) 
 		{
 			read(isdnfd,&data[t],1);
 			if ( data[t] != 0x10 ) 
 			{
-				fprintf(stderr,"<%02x>\n",data[t]);
+				ifax_dprintf(DEBUG_INFO,"<%02x>\n",data[t]);
 			}
 		}
 		data[t]=bitrev(data[t]);

@@ -79,7 +79,7 @@ int	fskmod_handle(ifax_modp self, void *data, size_t length)
 		dat=int2alaw((int)(0.62*2147483647.0*sin(priv->currphase)));
 //		dat=linear2ulaw((short)(25000.0*sin(priv->currphase)));
 #if 0
-		printf("Phases: %8.5f %11d %5d %11d %11d\n",sin(priv->currphase),
+		ifax_dprintf(DEBUG_DEBUG,"Phases: %8.5f %11d %5d %11d %11d\n",sin(priv->currphase),
 			(int)(2147483647.0*sin(priv->currphase)),
 			dat, alaw2int(dat), 
 			(int)(2147483647.0*sin(priv->currphase))-alaw2int(dat));
@@ -106,7 +106,7 @@ int	fskmod_construct(ifax_modp self,va_list args)
 	priv->p2  =(double)2.0*M_PI * (double)priv->f2 / SAMPLES_PER_SECOND ;
 	priv->currphase=0.0;
 
-	printf("Phases : %f %f\n",priv->p1,priv->p2);
+	ifax_dprintf(DEBUG_DEBUG,"Phases : %f %f\n",priv->p1,priv->p2);
 
 	return 0;
 }

@@ -82,9 +82,11 @@ static int isdnhandle=-1;
 static int inputhandle=0;
 static int outputhandle=1;
 
+enum MODEM_MODE { ORIGINATE, ANSWER };
+
 /* The actual "modem" code.
  */
-static void test_v21(void)
+static void test_v21(enum MODEM_MODE direction)
 {
 	/* module handles for all used modules.
 	 */
@@ -118,7 +120,15 @@ static void test_v21(void)
 
 	/* The FSK modulator. Its output is send to the ISDN line.
 	 */
-	fskenc=ifax_create_module(IFAX_FSKMOD,980,1180);
+	switch(direction)
+	{
+		case ORIGINATE:
+			fskenc=ifax_create_module(IFAX_FSKMOD,980,1180);
+			break;
+		case ANSWER:
+			fskenc=ifax_create_module(IFAX_FSKMOD,1650,1850);
+			break;
+	}
 	fskenc->sendto=toisdn;
 
 	/* The serializer. Its output is sent to the FSK modulator.
@@ -142,7 +152,15 @@ static void test_v21(void)
 	/* The FSK demodulator. Takes the aLaw input stream and sends the
 	 * decoded version to the deserializer. See above. 
 	 */
-	fskd=ifax_create_module(IFAX_FSKDEMOD,1650,1850,300);
+	switch(direction)
+	{
+		case ORIGINATE:
+			fskd=ifax_create_module(IFAX_FSKDEMOD,1650,1850,300);
+			break;
+		case ANSWER:
+			fskd=ifax_create_module(IFAX_FSKDEMOD,980,1180,300);
+			break;
+	}
 	fskd->sendto=deserial;
 
 	/* The first two seconds are reserved to send a steady carrier.
@@ -242,17 +260,17 @@ void dial_isdn(char *number)
  */
 void answer_isdn(void)
 {
-	/* Answer the pending call - hope there is one ...
-	 */
-	IsdnCommand(isdnhandle,"ATA",1,1);
-
 	/* Set up the packet size.
 	 */
 	IsdnCommand(isdnhandle,"ATS16=48",1,1);	/* Sendpacketsize/16 WHY ??? */
 
-	/* Start full duplex audio transmission.
+	/* Answer the pending call - hope there is one ...
 	 */
-	IsdnCommand(isdnhandle,"AT+VTX+VRX",1,0);
+	IsdnCommand(isdnhandle,"ATA",1,1);
+
+//	/* Start full duplex audio transmission.
+//	 */
+//	IsdnCommand(isdnhandle,"AT+VTX+VRX",1,0);
 }
 
 /* Print out how to use this program.
@@ -327,13 +345,32 @@ void main(int argc,char **argv)
 	 */
 	setup_isdn(sourcemsn);
 
-	/* Call the remote station.
-	 */
-	dial_isdn(numbertodial);
+	if (strcmp(numbertodial,"answer")==0)
+	{
+		/* Wait for the remote station.
+		 */
+		while(1)
+		{
+			char buffer[256];
+			IsdnReadLine(isdnhandle,buffer,sizeof(buffer));
+			printf("Readline:%s",buffer);
+			if (strncmp(buffer,"RING",4)==0) break;
+		}
+		answer_isdn();
+		/* Go to transfer mode.
+		 */
+		test_v21(ANSWER);
+	}
+	else
+	{
+		/* Call the remote station.
+		 */
+		dial_isdn(numbertodial);
+		/* Go to transfer mode.
+		 */
+		test_v21(ORIGINATE);
+	}
 
-	/* Go to transfer mode.
-	 */
-	test_v21();
 
 	/* Clean up and exit.
 	 */

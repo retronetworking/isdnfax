@@ -1,0 +1,105 @@
+<html>
+
+<head>
+   <meta http-equiv="Content-Type" content="text/html; charset=iso-8859-1">
+   <meta name="HISTORY" content="19990602: First web-announce of i4lfax Software Fax OSS project">
+   <meta name="KeyWords" content="V.21, V.29, V.17, fax, modem, DSP, modulation, demodulation">
+   <title>i4lfax - Software fax solution</title>
+</head>
+
+<body text="#FFFFFF" bgcolor="#000000" link="#00EE00" vlink="#00EE00" alink="#00EE00">
+
+<table border=0 cellspacing=0 cellpadding=0>
+ <tr>
+  <td colspan=3><a href="banner.html"><img src="i4lfaxbanner.gif" height=110 width=760 border=0></a></td>
+
+ <tr>
+  <td valign=top>
+   <table width=200 cellpadding=3>
+    <tr><td valign=top>&nbsp;</td></tr>
+    <tr><td valign=top><h2><a href="index.html">Back to<br>main page</a></h2></td></tr>
+    <tr><td valign=top>&nbsp;</td></tr>
+    <tr><td valign=top>Last updated Sep. 17 1999 by <a href="mailto:Morten.Rolland@asker.mail.telia.com">Morten&nbsp;Rolland</a></td></tr>
+   </table>
+  </td>
+  <td valign=top>
+   <table width=560>
+    <td>
+
+     <h1>The pros and cons of a userspace "modem"</h1>
+
+     <p>An ongoing debate is what functionality should go into a kernel
+     and which should not.  I believe a wise man said something
+     similar to (this is not a correct quote, and I have no references,
+     sorry):</p>
+
+     <p><i>Improving software is best done by removing bits and pieces
+     of it that is not needed, until no more can be removed.</i></p>
+
+     <p>My personal belief is that this is a good tactic for the Linux
+     kernel, as a smaller kernel is more easilly debugged and verified.
+     The 'i4lfax' project is basically a userspace project. There are
+     many arguments in favour of a userspace project, and a few against
+     (comments welcome):</p>
+
+     <h2>pros</h2>
+
+     <ol>
+       <li>Avoids kernel bloat, better stability of overall system
+       <li>Easier development cycle (no crashes, can use debugger,
+           simple to set up a dry-run and catching debugging output)
+       <li>No need to sync to kernel (development/stable) or release
+           the software as patches to various kernel releases
+       <li>Patent problems will be localized to the userspace
+           program only, and as the program can have a license
+	   different from the GPL, distribution problems like the
+           ones caused by the GPL can be avoided
+       <li>Very easy to port to other OS
+       <li>New and/or exotic IO-devices can be supported easilly, even
+           if they don't exist in every kernel, or is userspace only.
+     </ol>
+
+     <p>Comments: Personally, I think (1) and (4) are the most
+     fundamental and important arguments against a kernelspace
+     implementation.  If (4) turns out to be a problem once inside
+     the kernel, a lot of work will be needed to revert to a
+     userspace solution if evicted from the kernel.</p>
+
+     <p>Secondly (2) and (3) and (6) are very good news to the programmers,
+     as it reduces development effort and helps concentrate effort where
+     needed.</p>
+
+     <p>Thirdly (5) is good news to the open source movement in general,
+     and a larger user base will help improve the quality of the software.</p>
+
+     <h2>Cons</h2>
+
+     <ol>
+       <li>Latency and regular sample delivery
+       <li>Ease of use and interoperablity
+     </ol>           
+
+     <p>Comments: It seems like (1) will not be a problem, or it can
+     be dealt with by improving the real-time scheduler in Linux, for
+     the benefit of not only the 'i4lfax' project.</p>
+
+     <p>The ease of use part is of unknown importance; the pty/tty
+     interface can probably be made sufficiently automatic to be
+     viable as a modem emulation device.</p>
+
+     <p>The SLIP/PPP kernel-layer is also rumoured to work over ptys.  This
+     is untested, but should work, and should be fixed if it doesn't.
+     Some changes to the kernel may thus be needed to properly support
+     a modem in a userspace process, but they should be small end
+     generic.</p>
+
+     <p>Morten Rolland</p>
+
+    </td>
+   </table>
+  </td>
+ </tr>
+</table>
+
+</body>
+</html>

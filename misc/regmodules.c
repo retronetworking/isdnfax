@@ -44,6 +44,7 @@
 #include <ifax/modules/linedriver.h>
 #include <ifax/modules/V.29_demod.h>
 #include <ifax/modules/replicate.h>
+#include <ifax/modules/hdlc-framing.h>
 
 /* FIXME: The following should be in header-files */
 extern int send_to_audio_construct (ifax_modp self, va_list args);
@@ -79,6 +80,7 @@ ifax_module_id IFAX_FAXCONTROL;
 ifax_module_id IFAX_LINEDRIVER;
 ifax_module_id IFAX_SIGNALGEN;
 ifax_module_id IFAX_V29DEMOD;
+ifax_module_id IFAX_ENCODER_HDLC;
 
 
 #define REGMODULE(m,d,c) m=ifax_register_module_class(d,c)
@@ -103,4 +105,5 @@ void register_modules(void)
   REGMODULE(IFAX_SIGNALGEN,"Misc signal generator",signalgen_construct);
   REGMODULE(IFAX_LINEDRIVER,"Linedriver",linedriver_construct);
   REGMODULE(IFAX_V29DEMOD,"V.29 Demodulator",V29demod_construct);
+  REGMODULE(IFAX_ENCODER_HDLC,"HDLC encoder",encoder_hdlc_construct);
 }

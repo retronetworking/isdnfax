@@ -1,8 +1,32 @@
-/* bitreverse.h
- *
- * Mirror the bits of an unsigned character so that b0 -> b7, b1 -> b6 etc.
- *
- * (C) 1998 Morten Rolland
- */
+/* $Id$
+******************************************************************************
 
-unsigned char bitrev(unsigned char v);
+   Fax program for ISDN.
+   Lookup tables to handle bit-reversal of 8-bits
+
+   Copyright (C) 1998 Morten Rolland [Morten.Rolland@asker.mail.telia.com]
+  
+   Permission is hereby granted, free of charge, to any person obtaining a
+   copy of this software and associated documentation files (the "Software"),
+   to deal in the Software without restriction, including without limitation
+   the rights to use, copy, modify, merge, publish, distribute, sublicense,
+   and/or sell copies of the Software, and to permit persons to whom the
+   Software is furnished to do so, subject to the following conditions:
+
+   The above copyright notice and this permission notice shall be included in
+   all copies or substantial portions of the Software.
+
+   THE SOFTWARE IS PROVIDED "AS IS", WITHOUT WARRANTY OF ANY KIND, EXPRESS OR
+   IMPLIED, INCLUDING BUT NOT LIMITED TO THE WARRANTIES OF MERCHANTABILITY,
+   FITNESS FOR A PARTICULAR PURPOSE AND NONINFRINGEMENT.  IN NO EVENT SHALL
+   THE AUTHOR(S) BE LIABLE FOR ANY CLAIM, DAMAGES OR OTHER LIABILITY, WHETHER
+   IN AN ACTION OF CONTRACT, TORT OR OTHERWISE, ARISING FROM, OUT OF OR IN
+   CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN THE SOFTWARE.
+
+******************************************************************************
+*/
+
+#include <ifax/types.h>
+
+extern ifax_uint8 bitreverse[256];
+ifax_uint8 bitrev(ifax_uint8);

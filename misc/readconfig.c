@@ -75,6 +75,7 @@ char *config_file = DEFAULT_CONFIG_FILE;
 char *pid_file = DEFAULT_PID_FILE;
 char *isdn_device = DEFAULT_ISDN_DEVICE;
 char *isdn_msn = DEFAULT_ISDN_MSN;
+char *subscriber_id = "";
 char *home_country = DEFAULT_COUNTRY;
 char *int_prefix = DEFAULT_INT_PREFIX;
 int watchdog_timeout = DEFAULT_WATCHDOG_TIMEOUT;
@@ -196,7 +197,7 @@ static void end_line(char **pp)
 void read_configuration_file(void)
 {
   FILE *cfg;
-  char *p;
+  char *p, *tmp;
   char buffer[MAXCFGLINE+4];
 
   if ( (cfg=fopen(config_file,"r")) == 0 ) {
@@ -285,6 +286,27 @@ void read_configuration_file(void)
 	fprintf(stderr,"%s: 'lock-memory' must be 0 or 1 in config file\n",
 		progname);
 	exit(1);
+      }
+      continue;
+    }
+
+    if ( cmd_match("subscriber-identification",&p) ) {
+      skip_assignment(&p);
+      subscriber_id = get_string(&p);
+      end_line(&p);
+      if ( strlen(subscriber_id) > 20 ) {
+	fprintf(stderr,"%s: subscriber-identification more than 20 chars\n",
+		progname);
+	exit(1);
+      }
+      tmp = subscriber_id;
+      while ( *tmp ) {
+	if ( *tmp != '+' && *tmp != ' ' && (*tmp < '0' || *tmp > '9') ) {
+	  fprintf(stderr,"%s: subscriber-identification illegal char '%c'\n",
+		  progname,*tmp);
+	  exit(1);
+	}
+	tmp++;
       }
       continue;
     }

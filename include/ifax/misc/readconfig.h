@@ -31,6 +31,7 @@ extern char *pid_file;
 extern char *isdn_device;
 extern char *isdn_msn;
 extern char *home_country;
+extern char *subscriber_id;
 extern char *int_prefix;
 extern int watchdog_timeout;
 extern int realtime_priority;

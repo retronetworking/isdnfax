@@ -1,6 +1,21 @@
 Changelog:
 ----------
-
+99-08-29 [morten]:
+	* Changed fsk_demod to properly use its lookuptables (alaw problem)
+	* Updated G3/commandframes.c to produce valid frames
+	* Made incomming fax statemachine terminate for the benefit of
+	  logging to file (not generate large files)
+	* New configuration option 'subscriber-identification' used to
+	  assign the string announced in the CSI frame (called
+	  subscriber identification).
+	* Minor changes to hdlc-framing.c (FCS calculation).
+	* 'amodemd' now defaults to incomming fax reception simulation
+	  mode with no ISDN-connection, only logging.  This is for
+	  testin only, can be disabled with undef TESTING.
+	* New directory 'html' created with all files from i4lfax
+	  homepage.  Change the files in CVS, I'll upload them when
+	  they change.
+	
 99-07-02 [becka]:
 	* Changes to fsk_demod:
 	  - First parameter at creation now gives samplerate. Allows for 

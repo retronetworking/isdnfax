@@ -47,10 +47,15 @@
 #include <ifax/misc/watchdog.h>
 #include <ifax/misc/regmodules.h>
 #include <ifax/misc/isdnline.h>
+#include <ifax/misc/timers.h>
+#include <ifax/misc/softsignals.h>
 #include <ifax/modules/linedriver.h>
+#include <ifax/G3/initialize.h>
+#include <ifax/G3/kernel.h>
 
 
 static struct IsdnHandle *ih;
+static struct G3fax *fax;
 
 /* Parse command-line arguments and bail out with an error message if
  * something is wrong.
@@ -110,7 +115,8 @@ static void select_wait(void)
 static void setup_incomming(void)
 {
   reset_timers();
-  fax_prepare_incomming();
+  reset_softsignals();
+  fax_prepare_incomming(fax);
 }
 
 static void handle_call(void)
@@ -123,6 +129,7 @@ static void handle_call(void)
     if ( samples < 0 )
       break;
     decrease_timers(samples);
+    fax_run_internals(fax);
   }
 }
 
@@ -146,14 +153,14 @@ void main(int argc, char **argv)
 
   register_modules();
 
-  initialize_fax();
-
   /* Start slave I/O and interface process here when available... */
 
   ih = IsdnInit(isdn_device,isdn_msn);
 
   linedriver = ifax_create_module(IFAX_LINEDRIVER);
   ifax_command(linedriver,CMD_LINEDRIVER_ISDN,ih);
+
+  fax = initialize_G3fax(linedriver);
 
   initialize_realtime();
 

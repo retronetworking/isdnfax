@@ -1,9 +1,9 @@
 LDFLAGS=-lm
 CFLAGS=-O2 -g -Wall -pedantic -Iinclude
 
-SUBDIRS = lib modules misc
+SUBDIRS = lib modules misc G3
 
-MODULES = misc/misc.a modules/modules.a lib/isdnlib.a
+MODULES = misc/misc.a modules/modules.a G3/g3.a lib/isdnlib.a
 
 PROGRAMS = v21_softmodem test amodemd
 

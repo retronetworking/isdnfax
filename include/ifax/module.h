@@ -129,4 +129,7 @@ void ifax_handle_demand(struct ifax_module *self, size_t len);
  */
 int ifax_command(struct ifax_module *self, int command, ...);
 
+/* Establish a signal chain from src-module to dst-module */
+void ifax_connect(struct ifax_module *src, struct ifax_module *dst);
+
 #endif

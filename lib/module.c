@@ -123,3 +123,12 @@ int ifax_command(struct ifax_module *self, int command, ...)
 	return rc;
 }
 
+/* Make a connection in a chain of signal-processing modules and update
+ * both forward and backward pointers.  The direction of the flow of data
+ * is from the source module to the destination module.
+ */
+void ifax_connect(struct ifax_module *src, struct ifax_module *dst)
+{
+	src->sendto = dst;
+	dst->recvfrom = src;
+}

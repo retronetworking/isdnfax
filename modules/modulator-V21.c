@@ -55,6 +55,7 @@
 #include <stdarg.h>
 
 #include <ifax/ifax.h>
+#include <ifax/misc/malloc.h>
 #include <ifax/modules/modulator-V21.h>
 
 /* The following two defines are closely related, and must not be changed */
@@ -209,8 +210,8 @@ int modulator_V21_construct(ifax_modp self,va_list args)
 {
   modulator_V21_private *priv;
 
-  if ( (priv = self->private = malloc(sizeof(modulator_V21_private))) == 0 )
-    return 1;
+  priv = ifax_malloc(sizeof(modulator_V21_private),"V.21 modulator instance");
+  self->private = priv;
 
   self->destroy = modulator_V21_destroy;
   self->handle_input = modulator_V21_handle;

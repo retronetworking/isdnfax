@@ -39,6 +39,7 @@
 
 #include <ifax/ifax.h>
 #include <ifax/types.h>
+#include <ifax/misc/malloc.h>
 #include <ifax/modules/generic.h>
 #include <ifax/modules/modulator-V29.h>
 
@@ -531,8 +532,9 @@
       modulator_V29_private *priv;
       int t;
    
-      if ( (priv = self->private = malloc(sizeof(modulator_V29_private))) == 0 )
-         return 1;
+      priv = ifax_malloc(sizeof(modulator_V29_private),
+			 "V.29 modulator instance");
+      self->private = priv;
    
       self->destroy = modulator_V29_destroy;
       self->handle_input = modulator_V29_handle;

@@ -38,6 +38,9 @@
  *    Output:
  *       - 16-bit signed samples
  *       - length specifies number of samples
+ *    or
+ *       - Byte-packed bitstream
+ *       - length specifies number of bits
  *
  *    Commands supported:
  *       CMD_SIGNALGEN_SINUS,rate,freq,scale
@@ -55,6 +58,7 @@
 #include <stdlib.h>
 #include <ifax/ifax.h>
 #include <ifax/sincos.h>
+#include <ifax/misc/malloc.h>
 #include <ifax/modules/signalgen.h>
 
 typedef struct {
@@ -161,8 +165,8 @@ int signalgen_construct(ifax_modp self, va_list args )
 {
   signalgen_private *priv;
 
-  if ( (priv = self->private = malloc(sizeof(signalgen_private))) == 0 )
-    return 1;
+  priv = ifax_malloc(sizeof(signalgen_private),"Signalgen instance");
+  self->private = priv;
 
   self->destroy = signalgen_destroy;
   self->handle_input = 0;

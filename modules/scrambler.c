@@ -46,6 +46,7 @@
 #include <stdarg.h>
 #include <ifax/ifax.h>
 #include <ifax/types.h>
+#include <ifax/misc/malloc.h>
 #include <ifax/modules/generic.h>
 #include <ifax/modules/scrambler.h>
 
@@ -244,8 +245,8 @@ int scrambler_construct(ifax_modp self,va_list args)
 {
   scrambler_private *priv;
   
-  if ( (priv = self->private = malloc(sizeof(scrambler_private))) == 0 )
-    return 1;
+  priv = ifax_malloc(sizeof(scrambler_private),"Scrambler instance");
+  self->private = priv;
 
   self->destroy	=  scrambler_destroy;
   self->handle_input = scrambler_handle;

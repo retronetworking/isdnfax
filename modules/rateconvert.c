@@ -67,6 +67,7 @@
 #include <stdlib.h>
 #include <ifax/ifax.h>
 #include <ifax/types.h>
+#include <ifax/misc/malloc.h>
 #include <ifax/modules/rateconvert.h>
 
 
@@ -198,8 +199,8 @@ int rateconvert_construct(ifax_modp self, va_list args )
   ifax_sint16 *filtercoef, *dp, *sp;
   int dry;
 
-  if ( (priv = self->private = malloc(sizeof(rateconvert_private))) == 0 )
-    return 1;
+  priv = ifax_malloc(sizeof(rateconvert_private),"Rateconverter instance");
+  self->private = priv;
 
   self->destroy = rateconvert_destroy;
   self->handle_input = rateconvert_handle;
@@ -217,14 +218,14 @@ int rateconvert_construct(ifax_modp self, va_list args )
   if ( (priv->subfiltsize * priv->upfactor) != priv->filtersize )
     return 1;
 
-  if ( (priv->data=malloc(sizeof(*priv->data)*priv->subfiltsize)) == 0 )
-    return 1;
+  priv->data = ifax_malloc(sizeof(*priv->data)*priv->subfiltsize,
+			   "Rateconverter sample history");
 
-  if ( (priv->coefs=malloc(sizeof(*priv->coefs)*priv->filtersize)) == 0 )
-    return 1;
+  priv->coefs = ifax_malloc(sizeof(*priv->coefs)*priv->filtersize,
+			    "Rateconverter coeficient storage");
 
-  if ( (priv->subfilter=malloc(sizeof(*priv->subfilter)*priv->upfactor)) == 0 )
-    return 1;
+  priv->subfilter = ifax_malloc(sizeof(*priv->subfilter)*priv->upfactor,
+				"Rateconverter subfilter pointer array");
 
   priv->storenext = 0;
   for ( t=0; t < priv->subfiltsize; t++ )
@@ -267,8 +268,8 @@ int rateconvert_construct(ifax_modp self, va_list args )
   priv->dry_period = 0;
   priv->next_seq = 0;
   priv->seq_size = priv->upfactor * priv->downfactor;
-  if ( (priv->seq = malloc(sizeof(*priv->seq)*priv->seq_size)) == 0 )
-    return 1;
+  priv->seq = ifax_malloc(sizeof(*priv->seq)*priv->seq_size,
+			  "Rateconverter sequencing lookup table");
 
   decimate = 0;
   dry = 0;

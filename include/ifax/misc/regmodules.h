@@ -32,6 +32,9 @@
  * When registered, the IFAX_ handles can be used to reference them.
  */
 
+#include <ifax/module.h>
+#include <ifax/misc/malloc.h>
+
 extern ifax_module_id IFAX_TOAUDIO;
 extern ifax_module_id IFAX_PULSEGEN;
 extern ifax_module_id IFAX_SINEGEN;

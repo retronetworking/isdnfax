@@ -26,5 +26,9 @@
 ******************************************************************************
 */
 
+#include <ifax/module.h>
+#include <ifax/misc/globals.h>
+
 char *progname = "amodemd";
 int run_as_daemon = 0;
+ifax_modp linedriver;

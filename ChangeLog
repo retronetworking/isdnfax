@@ -1,6 +1,17 @@
 Changelog:
 ----------
 
+99-07-01 [morten]:
+	* Added new framework for State-machines, see misc/statemachines.c
+	  and G3/fsm.c
+	* hdlc-framing.c can now be asked if it is idle, and for how many
+	  bits it has been so.  Usefull for deciding if the current frame
+	  has completed so that a signal-chain reconfiguration or similar
+	  can be performed.
+	* The file 'G3/commandframes.c' contains a rough attempt at
+	  assemblig command-frames (DIS, NSF, CSI etc.) that can be used
+	  by the statemachines when various responses are needed.
+	
 99-06-28 [becka]:
 	* modified environment.c to not abort when realtime stuff cannot be
 	  initialized.

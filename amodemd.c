@@ -52,10 +52,10 @@
 #include <ifax/modules/linedriver.h>
 #include <ifax/G3/initialize.h>
 #include <ifax/G3/kernel.h>
+#include <ifax/G3/fax.h>
 
 
 static struct IsdnHandle *ih;
-static struct G3fax *fax;
 
 /* Parse command-line arguments and bail out with an error message if
  * something is wrong.
@@ -129,7 +129,7 @@ static void handle_call(void)
     if ( samples < 0 )
       break;
     decrease_timers(samples);
-    fax_run_internals(fax);  // runs the state machine
+    fax_run_internals();       /* runs the state machine(s) */
   }
 }
 
@@ -159,10 +159,10 @@ void main(int argc, char **argv)
 
   linedriver = ifax_create_module(IFAX_LINEDRIVER);
   ifax_command(linedriver,CMD_LINEDRIVER_ISDN,ih);
-  ifax_command(linedriver,CMD_LINEDRIVER_AUDIO);
-  ifax_command(linedriver,CMD_LINEDRIVER_RECORD,"isdndump.dat");
+  /* ifax_command(linedriver,CMD_LINEDRIVER_AUDIO); */
+  /* ifax_command(linedriver,CMD_LINEDRIVER_RECORD,"isdndump.dat"); */
 
-  fax = initialize_G3fax(linedriver);
+  initialize_G3fax(linedriver);
 
   initialize_realtime();
 

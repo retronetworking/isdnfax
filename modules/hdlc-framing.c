@@ -41,6 +41,7 @@
 #include <ifax/ifax.h>
 #include <ifax/types.h>
 #include <ifax/misc/malloc.h>
+#include <ifax/bitreverse.h>
 #include <ifax/modules/hdlc-framing.h>
 
 #define MAXBUFFER 512
@@ -74,20 +75,19 @@ typedef struct {
 
 
 /* The 'bitstufftbl' array is used to help determine when and where
- * bit-stuffing should be used.  The HDLC protocol specifies that
+ * bit-stuffing should be applied.  The HDLC protocol specifies that
  * 6 bits in a row with value '1' is reserved for the FLAG sequence.
  * A flag is used to start and stop a frame.
- * When there are 6 bits in a row with value '1' in the body of
+ * When there are 5 bits in a row with value '1' in the body of
  * a frame, they have to be bit-stuffed, so that there is a '0'
  * inserted after the first 5 bits.  The bit-stream is expanded as
  * a result of this, but the advantage is that frame synchronisation
  * is rapidly established.
  *
- * The 'bitstufftbl' is used to answer the following three questions:
+ * The 'bitstufftbl' is used to answer the following two questions:
  *
  *   1) How many consecutive '1' is there from LSB and up
- *   2) How many consecutive '1' is there from MSB and down
- *   3) Should a '0' be inserted in bit-positions 5, 6 or 7 (or none)
+ *   2) Should a '0' be inserted in bit-positions 5-8 (0 means no stuffing)
  *
  * The index to the table is the 8 bit unsigned intger in question:
  *
@@ -96,38 +96,272 @@ typedef struct {
  *
  * The lookup-value is a packed character, whith the following fields:
  *
- *       v7 v6         |  v5 v4 v3     | v2 v1 v0
- *       --------------+---------------+---------
- *       Position      |  Number of    | Number of
- *       of needed     |  '1' from     | '1' from
- *       stuffing      |  MSB and      | LSB and up
- *       0 => none     |  down, max    |
- *       1-3 => x5-x7  |  value of 5   |
+ *       v7 v6 v5 v4   | v3 v2 v1 v0
+ *       --------------+------------
+ *       Position      | Number of
+ *       of needed     | '1' from
+ *       stuffing      | LSB and up
+ *       0 => none     |
+ *       5-8 => x5-x8  |
  */
 
 static ifax_uint8 bitstufftbl[256] = {
-  0x00,0x01,0x00,0x02,0x00,0x01,0x00,0x03,0x00,0x01,0x00,0x02,
-  0x00,0x01,0x00,0x04,0x00,0x01,0x00,0x02,0x00,0x01,0x00,0x03,
-  0x00,0x01,0x00,0x02,0x00,0x01,0x00,0x05,0x00,0x01,0x00,0x02,
-  0x00,0x01,0x00,0x03,0x00,0x01,0x00,0x02,0x00,0x01,0x00,0x04,
-  0x00,0x01,0x00,0x02,0x00,0x01,0x00,0x03,0x00,0x01,0x00,0x02,
-  0x00,0x01,0x00,0x46,0x00,0x01,0x00,0x02,0x00,0x01,0x00,0x03,
-  0x00,0x01,0x00,0x02,0x00,0x01,0x00,0x04,0x00,0x01,0x00,0x02,
-  0x00,0x01,0x00,0x03,0x00,0x01,0x00,0x02,0x00,0x01,0x00,0x05,
-  0x00,0x01,0x00,0x02,0x00,0x01,0x00,0x03,0x00,0x01,0x00,0x02,
-  0x00,0x01,0x00,0x04,0x00,0x01,0x00,0x02,0x00,0x01,0x00,0x03,
-  0x00,0x01,0x00,0x02,0x00,0x01,0x80,0x47,0x08,0x09,0x08,0x0a,
-  0x08,0x09,0x08,0x0b,0x08,0x09,0x08,0x0a,0x08,0x09,0x08,0x0c,
-  0x08,0x09,0x08,0x0a,0x08,0x09,0x08,0x0b,0x08,0x09,0x08,0x0a,
-  0x08,0x09,0x08,0x0d,0x08,0x09,0x08,0x0a,0x08,0x09,0x08,0x0b,
-  0x08,0x09,0x08,0x0a,0x08,0x09,0x08,0x0c,0x08,0x09,0x08,0x0a,
-  0x08,0x09,0x08,0x0b,0x08,0x09,0x08,0x0a,0x08,0x09,0x08,0x4e,
-  0x10,0x11,0x10,0x12,0x10,0x11,0x10,0x13,0x10,0x11,0x10,0x12,
-  0x10,0x11,0x10,0x14,0x10,0x11,0x10,0x12,0x10,0x11,0x10,0x13,
-  0x10,0x11,0x10,0x12,0x10,0x11,0x10,0x15,0x18,0x19,0x18,0x1a,
-  0x18,0x19,0x18,0x1b,0x18,0x19,0x18,0x1a,0x18,0x19,0x18,0x1c,
-  0x20,0x21,0x20,0x22,0x20,0x21,0x20,0x23,0x28,0x29,0x28,0x2a,
-  0xe8,0xe9,0xa8,0x6f
+  0x00,    /* 00000000 => 0 bits                    */
+  0x01,    /* 00000001 => 1 bits                    */
+  0x00,    /* 00000010 => 0 bits                    */
+  0x02,    /* 00000011 => 2 bits                    */
+  0x00,    /* 00000100 => 0 bits                    */
+  0x01,    /* 00000101 => 1 bits                    */
+  0x00,    /* 00000110 => 0 bits                    */
+  0x03,    /* 00000111 => 3 bits                    */
+  0x00,    /* 00001000 => 0 bits                    */
+  0x01,    /* 00001001 => 1 bits                    */
+  0x00,    /* 00001010 => 0 bits                    */
+  0x02,    /* 00001011 => 2 bits                    */
+  0x00,    /* 00001100 => 0 bits                    */
+  0x01,    /* 00001101 => 1 bits                    */
+  0x00,    /* 00001110 => 0 bits                    */
+  0x04,    /* 00001111 => 4 bits                    */
+  0x00,    /* 00010000 => 0 bits                    */
+  0x01,    /* 00010001 => 1 bits                    */
+  0x00,    /* 00010010 => 0 bits                    */
+  0x02,    /* 00010011 => 2 bits                    */
+  0x00,    /* 00010100 => 0 bits                    */
+  0x01,    /* 00010101 => 1 bits                    */
+  0x00,    /* 00010110 => 0 bits                    */
+  0x03,    /* 00010111 => 3 bits                    */
+  0x00,    /* 00011000 => 0 bits                    */
+  0x01,    /* 00011001 => 1 bits                    */
+  0x00,    /* 00011010 => 0 bits                    */
+  0x02,    /* 00011011 => 2 bits                    */
+  0x00,    /* 00011100 => 0 bits                    */
+  0x01,    /* 00011101 => 1 bits                    */
+  0x00,    /* 00011110 => 0 bits                    */
+  0x55,    /* 00011111 => 5 bits   (Stuff at bit 5) */
+  0x00,    /* 00100000 => 0 bits                    */
+  0x01,    /* 00100001 => 1 bits                    */
+  0x00,    /* 00100010 => 0 bits                    */
+  0x02,    /* 00100011 => 2 bits                    */
+  0x00,    /* 00100100 => 0 bits                    */
+  0x01,    /* 00100101 => 1 bits                    */
+  0x00,    /* 00100110 => 0 bits                    */
+  0x03,    /* 00100111 => 3 bits                    */
+  0x00,    /* 00101000 => 0 bits                    */
+  0x01,    /* 00101001 => 1 bits                    */
+  0x00,    /* 00101010 => 0 bits                    */
+  0x02,    /* 00101011 => 2 bits                    */
+  0x00,    /* 00101100 => 0 bits                    */
+  0x01,    /* 00101101 => 1 bits                    */
+  0x00,    /* 00101110 => 0 bits                    */
+  0x04,    /* 00101111 => 4 bits                    */
+  0x00,    /* 00110000 => 0 bits                    */
+  0x01,    /* 00110001 => 1 bits                    */
+  0x00,    /* 00110010 => 0 bits                    */
+  0x02,    /* 00110011 => 2 bits                    */
+  0x00,    /* 00110100 => 0 bits                    */
+  0x01,    /* 00110101 => 1 bits                    */
+  0x00,    /* 00110110 => 0 bits                    */
+  0x03,    /* 00110111 => 3 bits                    */
+  0x00,    /* 00111000 => 0 bits                    */
+  0x01,    /* 00111001 => 1 bits                    */
+  0x00,    /* 00111010 => 0 bits                    */
+  0x02,    /* 00111011 => 2 bits                    */
+  0x00,    /* 00111100 => 0 bits                    */
+  0x01,    /* 00111101 => 1 bits                    */
+  0x60,    /* 00111110 => 0 bits   (Stuff at bit 6) */
+  0x56,    /* 00111111 => 6 bits   (Stuff at bit 5) */
+  0x00,    /* 01000000 => 0 bits                    */
+  0x01,    /* 01000001 => 1 bits                    */
+  0x00,    /* 01000010 => 0 bits                    */
+  0x02,    /* 01000011 => 2 bits                    */
+  0x00,    /* 01000100 => 0 bits                    */
+  0x01,    /* 01000101 => 1 bits                    */
+  0x00,    /* 01000110 => 0 bits                    */
+  0x03,    /* 01000111 => 3 bits                    */
+  0x00,    /* 01001000 => 0 bits                    */
+  0x01,    /* 01001001 => 1 bits                    */
+  0x00,    /* 01001010 => 0 bits                    */
+  0x02,    /* 01001011 => 2 bits                    */
+  0x00,    /* 01001100 => 0 bits                    */
+  0x01,    /* 01001101 => 1 bits                    */
+  0x00,    /* 01001110 => 0 bits                    */
+  0x04,    /* 01001111 => 4 bits                    */
+  0x00,    /* 01010000 => 0 bits                    */
+  0x01,    /* 01010001 => 1 bits                    */
+  0x00,    /* 01010010 => 0 bits                    */
+  0x02,    /* 01010011 => 2 bits                    */
+  0x00,    /* 01010100 => 0 bits                    */
+  0x01,    /* 01010101 => 1 bits                    */
+  0x00,    /* 01010110 => 0 bits                    */
+  0x03,    /* 01010111 => 3 bits                    */
+  0x00,    /* 01011000 => 0 bits                    */
+  0x01,    /* 01011001 => 1 bits                    */
+  0x00,    /* 01011010 => 0 bits                    */
+  0x02,    /* 01011011 => 2 bits                    */
+  0x00,    /* 01011100 => 0 bits                    */
+  0x01,    /* 01011101 => 1 bits                    */
+  0x00,    /* 01011110 => 0 bits                    */
+  0x55,    /* 01011111 => 5 bits   (Stuff at bit 5) */
+  0x00,    /* 01100000 => 0 bits                    */
+  0x01,    /* 01100001 => 1 bits                    */
+  0x00,    /* 01100010 => 0 bits                    */
+  0x02,    /* 01100011 => 2 bits                    */
+  0x00,    /* 01100100 => 0 bits                    */
+  0x01,    /* 01100101 => 1 bits                    */
+  0x00,    /* 01100110 => 0 bits                    */
+  0x03,    /* 01100111 => 3 bits                    */
+  0x00,    /* 01101000 => 0 bits                    */
+  0x01,    /* 01101001 => 1 bits                    */
+  0x00,    /* 01101010 => 0 bits                    */
+  0x02,    /* 01101011 => 2 bits                    */
+  0x00,    /* 01101100 => 0 bits                    */
+  0x01,    /* 01101101 => 1 bits                    */
+  0x00,    /* 01101110 => 0 bits                    */
+  0x04,    /* 01101111 => 4 bits                    */
+  0x00,    /* 01110000 => 0 bits                    */
+  0x01,    /* 01110001 => 1 bits                    */
+  0x00,    /* 01110010 => 0 bits                    */
+  0x02,    /* 01110011 => 2 bits                    */
+  0x00,    /* 01110100 => 0 bits                    */
+  0x01,    /* 01110101 => 1 bits                    */
+  0x00,    /* 01110110 => 0 bits                    */
+  0x03,    /* 01110111 => 3 bits                    */
+  0x00,    /* 01111000 => 0 bits                    */
+  0x01,    /* 01111001 => 1 bits                    */
+  0x00,    /* 01111010 => 0 bits                    */
+  0x02,    /* 01111011 => 2 bits                    */
+  0x70,    /* 01111100 => 0 bits   (Stuff at bit 7) */
+  0x71,    /* 01111101 => 1 bits   (Stuff at bit 7) */
+  0x60,    /* 01111110 => 0 bits   (Stuff at bit 6) */
+  0x57,    /* 01111111 => 7 bits   (Stuff at bit 5) */
+  0x00,    /* 10000000 => 0 bits                    */
+  0x01,    /* 10000001 => 1 bits                    */
+  0x00,    /* 10000010 => 0 bits                    */
+  0x02,    /* 10000011 => 2 bits                    */
+  0x00,    /* 10000100 => 0 bits                    */
+  0x01,    /* 10000101 => 1 bits                    */
+  0x00,    /* 10000110 => 0 bits                    */
+  0x03,    /* 10000111 => 3 bits                    */
+  0x00,    /* 10001000 => 0 bits                    */
+  0x01,    /* 10001001 => 1 bits                    */
+  0x00,    /* 10001010 => 0 bits                    */
+  0x02,    /* 10001011 => 2 bits                    */
+  0x00,    /* 10001100 => 0 bits                    */
+  0x01,    /* 10001101 => 1 bits                    */
+  0x00,    /* 10001110 => 0 bits                    */
+  0x04,    /* 10001111 => 4 bits                    */
+  0x00,    /* 10010000 => 0 bits                    */
+  0x01,    /* 10010001 => 1 bits                    */
+  0x00,    /* 10010010 => 0 bits                    */
+  0x02,    /* 10010011 => 2 bits                    */
+  0x00,    /* 10010100 => 0 bits                    */
+  0x01,    /* 10010101 => 1 bits                    */
+  0x00,    /* 10010110 => 0 bits                    */
+  0x03,    /* 10010111 => 3 bits                    */
+  0x00,    /* 10011000 => 0 bits                    */
+  0x01,    /* 10011001 => 1 bits                    */
+  0x00,    /* 10011010 => 0 bits                    */
+  0x02,    /* 10011011 => 2 bits                    */
+  0x00,    /* 10011100 => 0 bits                    */
+  0x01,    /* 10011101 => 1 bits                    */
+  0x00,    /* 10011110 => 0 bits                    */
+  0x55,    /* 10011111 => 5 bits   (Stuff at bit 5) */
+  0x00,    /* 10100000 => 0 bits                    */
+  0x01,    /* 10100001 => 1 bits                    */
+  0x00,    /* 10100010 => 0 bits                    */
+  0x02,    /* 10100011 => 2 bits                    */
+  0x00,    /* 10100100 => 0 bits                    */
+  0x01,    /* 10100101 => 1 bits                    */
+  0x00,    /* 10100110 => 0 bits                    */
+  0x03,    /* 10100111 => 3 bits                    */
+  0x00,    /* 10101000 => 0 bits                    */
+  0x01,    /* 10101001 => 1 bits                    */
+  0x00,    /* 10101010 => 0 bits                    */
+  0x02,    /* 10101011 => 2 bits                    */
+  0x00,    /* 10101100 => 0 bits                    */
+  0x01,    /* 10101101 => 1 bits                    */
+  0x00,    /* 10101110 => 0 bits                    */
+  0x04,    /* 10101111 => 4 bits                    */
+  0x00,    /* 10110000 => 0 bits                    */
+  0x01,    /* 10110001 => 1 bits                    */
+  0x00,    /* 10110010 => 0 bits                    */
+  0x02,    /* 10110011 => 2 bits                    */
+  0x00,    /* 10110100 => 0 bits                    */
+  0x01,    /* 10110101 => 1 bits                    */
+  0x00,    /* 10110110 => 0 bits                    */
+  0x03,    /* 10110111 => 3 bits                    */
+  0x00,    /* 10111000 => 0 bits                    */
+  0x01,    /* 10111001 => 1 bits                    */
+  0x00,    /* 10111010 => 0 bits                    */
+  0x02,    /* 10111011 => 2 bits                    */
+  0x00,    /* 10111100 => 0 bits                    */
+  0x01,    /* 10111101 => 1 bits                    */
+  0x60,    /* 10111110 => 0 bits   (Stuff at bit 6) */
+  0x56,    /* 10111111 => 6 bits   (Stuff at bit 5) */
+  0x00,    /* 11000000 => 0 bits                    */
+  0x01,    /* 11000001 => 1 bits                    */
+  0x00,    /* 11000010 => 0 bits                    */
+  0x02,    /* 11000011 => 2 bits                    */
+  0x00,    /* 11000100 => 0 bits                    */
+  0x01,    /* 11000101 => 1 bits                    */
+  0x00,    /* 11000110 => 0 bits                    */
+  0x03,    /* 11000111 => 3 bits                    */
+  0x00,    /* 11001000 => 0 bits                    */
+  0x01,    /* 11001001 => 1 bits                    */
+  0x00,    /* 11001010 => 0 bits                    */
+  0x02,    /* 11001011 => 2 bits                    */
+  0x00,    /* 11001100 => 0 bits                    */
+  0x01,    /* 11001101 => 1 bits                    */
+  0x00,    /* 11001110 => 0 bits                    */
+  0x04,    /* 11001111 => 4 bits                    */
+  0x00,    /* 11010000 => 0 bits                    */
+  0x01,    /* 11010001 => 1 bits                    */
+  0x00,    /* 11010010 => 0 bits                    */
+  0x02,    /* 11010011 => 2 bits                    */
+  0x00,    /* 11010100 => 0 bits                    */
+  0x01,    /* 11010101 => 1 bits                    */
+  0x00,    /* 11010110 => 0 bits                    */
+  0x03,    /* 11010111 => 3 bits                    */
+  0x00,    /* 11011000 => 0 bits                    */
+  0x01,    /* 11011001 => 1 bits                    */
+  0x00,    /* 11011010 => 0 bits                    */
+  0x02,    /* 11011011 => 2 bits                    */
+  0x00,    /* 11011100 => 0 bits                    */
+  0x01,    /* 11011101 => 1 bits                    */
+  0x00,    /* 11011110 => 0 bits                    */
+  0x55,    /* 11011111 => 5 bits   (Stuff at bit 5) */
+  0x00,    /* 11100000 => 0 bits                    */
+  0x01,    /* 11100001 => 1 bits                    */
+  0x00,    /* 11100010 => 0 bits                    */
+  0x02,    /* 11100011 => 2 bits                    */
+  0x00,    /* 11100100 => 0 bits                    */
+  0x01,    /* 11100101 => 1 bits                    */
+  0x00,    /* 11100110 => 0 bits                    */
+  0x03,    /* 11100111 => 3 bits                    */
+  0x00,    /* 11101000 => 0 bits                    */
+  0x01,    /* 11101001 => 1 bits                    */
+  0x00,    /* 11101010 => 0 bits                    */
+  0x02,    /* 11101011 => 2 bits                    */
+  0x00,    /* 11101100 => 0 bits                    */
+  0x01,    /* 11101101 => 1 bits                    */
+  0x00,    /* 11101110 => 0 bits                    */
+  0x04,    /* 11101111 => 4 bits                    */
+  0x00,    /* 11110000 => 0 bits                    */
+  0x01,    /* 11110001 => 1 bits                    */
+  0x00,    /* 11110010 => 0 bits                    */
+  0x02,    /* 11110011 => 2 bits                    */
+  0x00,    /* 11110100 => 0 bits                    */
+  0x01,    /* 11110101 => 1 bits                    */
+  0x00,    /* 11110110 => 0 bits                    */
+  0x03,    /* 11110111 => 3 bits                    */
+  0x80,    /* 11111000 => 0 bits   (Stuff at bit 8) */
+  0x81,    /* 11111001 => 1 bits   (Stuff at bit 8) */
+  0x80,    /* 11111010 => 0 bits   (Stuff at bit 8) */
+  0x82,    /* 11111011 => 2 bits   (Stuff at bit 8) */
+  0x70,    /* 11111100 => 0 bits   (Stuff at bit 7) */
+  0x71,    /* 11111101 => 1 bits   (Stuff at bit 7) */
+  0x60,    /* 11111110 => 0 bits   (Stuff at bit 6) */
+  0x58,    /* 11111111 => 8 bits   (Stuff at bit 5) */
 };
 
 /* An important part of HDLC is frame cheacksum computation and checking.
@@ -187,12 +421,36 @@ static ifax_uint16 hdlc_fcs_lookup[256] = {
  * This function is rather large, but many of its large blocks
  * only gets invoked once in a while (bitstuffing once in 32 calls
  * for random binary data).
+ *
+ * A simple schetch to illustrate when bit-stuffing is
+ * performed (I got it wrong the first time...:-):
+ *
+ *  Pos   Stuffed  Previous
+ *  -----------------------
+ *   0     ???????+ 11111???
+ *   1     ??????+1 11110???
+ *   2     ?????+11 1110????
+ *   3     ????+111 110?????
+ *   4     ???+1111 10??????
+ *   5     ??+11111 0???????
+ *   6   ? ?+111110 ????????
+ *   7   ? +111110? ????????
+ *   8   + 111110?? ????????
+ *   9  +1 11110??? ????????
+ *
+ * Notice:   ?  Don't care
+ *           +  This is where bit-stuffing must be applied
+ *
+ * When bit-stuffing is applied, all the bits including the '+' and up
+ * is shifted one bit to the left, replacing the '+' with a zero.
+ * When bit-stuffing is applied in position 0-3, a second stuffing may
+ * have to be performed in position 6-9.
  */
 
 void produce_bits(encoder_hdlc_private *priv)
 {
   ifax_uint16 next, LSB_mask, LSB_bits;
-  ifax_uint8 n, p;
+  ifax_uint8 n, p, previous;
   int next_size, stuffpos;
 
   if ( priv->phase == IDLE ) {
@@ -255,31 +513,19 @@ void produce_bits(encoder_hdlc_private *priv)
    * to output.  If so, do bit stuffing.
    */
 
-  p = (bitstufftbl[priv->bitslide>>(priv->bitslide_size-8)]>>3) & 7;
-  n = bitstufftbl[next] & 7;
+  previous = priv->bitslide>>(priv->bitslide_size-8);
+  p = bitstufftbl[bitreverse[previous]&0xF] & 0xF;
+  n = bitstufftbl[next] & 0xF;
 
-  if ( p+n > 5 ) {
-    /* Need bit-stuffing in new-bit 0,1,..,5 */
+  if ( p+n >= 5 ) {
+    /* Need bit-stuffing somewhere in position 1-5 */
     stuffpos = 5 - p;
-    if ( stuffpos == 0 ) {
-      /* Easy stuffing, just shift left... Another reason for doing this
-       * test is that I don't trust the expression (1<<x) when x = 0 on
-       * all architectures.  But I'm probably just paranoid.
-       */
-      next <<= 1;
-      next_size++;
-    } else {
-      /* Not so easy stuffing... keep 'stuffpos' LSBs */
-      LSB_mask = (1<<stuffpos) - 1;
-      LSB_bits = next & LSB_mask;
-      next &= ~LSB_mask;
-      next <<= 1;
-      next_size++;
-      next |= LSB_bits;
-      if ( stuffpos > 2 )
-	/* Double bit-stuffing not needed, so skip the test */
-	goto no_more_stuffing;
-    }
+    LSB_mask = (1<<stuffpos) - 1;
+    LSB_bits = next & LSB_mask;
+    next &= ~LSB_mask;
+    next <<= 1;
+    next_size++;
+    next |= LSB_bits;
   }
 
   /* The table-lookup will tell us if we have a string of '1' completely
@@ -290,20 +536,16 @@ void produce_bits(encoder_hdlc_private *priv)
    * will be 0 and not cause bit-stuffing if it is not).
    */
 
-  stuffpos = bitstufftbl[next>>1]>>6;
+  stuffpos = bitstufftbl[next>>1]>>4;
 
   if ( stuffpos ) {
-    stuffpos += 6;
-
-    LSB_mask = (1<<stuffpos) - 1;
+    LSB_mask = (2<<stuffpos) - 1;
     LSB_bits = next & LSB_mask;
     next &= ~LSB_mask;
     next <<= 1;
     next_size++;
     next |= LSB_bits;
   }
-
- no_more_stuffing:
 
   /* Finaly insert the (bit-stuffed) string of bits (8-10 bits) into
    * the output-buffer

@@ -95,6 +95,9 @@ int	debug_handle(ifax_modp self, void *data, size_t length)
 				case DEBUG_FORMAT_SIGNED16BIT:
 					fprintf(file,"%d\n",(signed int)(*s16++));
 					break;
+				case DEBUG_FORMAT_16BIT_HEX:
+					fprintf(file,"0x%04x\n",((signed int)(*s16++))&0xffff);
+					break;
 				default:
 					fprintf(stderr,"Bad DEBUG_FORMAT_*\n");
 					exit(1);

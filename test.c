@@ -37,6 +37,7 @@
 #include <ifax/ifax.h>
 
 #include <ifax/modules/debug.h>
+#include <ifax/modules/faxcontrol.h>
 #include <ifax/modules/scrambler.h>
 #include <ifax/modules/modulator-V29.h>
 #include <ifax/modules/modulator-V21.h>
@@ -71,6 +72,7 @@ ifax_module_id  IFAX_DECODE_SERIAL;
 ifax_module_id  IFAX_ENCODE_SERIAL;
 ifax_module_id  IFAX_DECODE_HDLC;
 ifax_module_id  IFAX_DEBUG;
+ifax_module_id  IFAX_FAXCONTROL;
 
 void setup_all_modules(void)
 {
@@ -88,6 +90,7 @@ void setup_all_modules(void)
 	IFAX_MODULATORV21 = ifax_register_module_class("V.21 Modulator",modulator_V21_construct);
 	IFAX_RATECONVERT  = ifax_register_module_class("Sample-rate converter",rateconvert_construct);
 	IFAX_DEBUG        = ifax_register_module_class("Debugger",debug_construct);
+	IFAX_FAXCONTROL   = ifax_register_module_class("Fax control",faxcontrol_construct);
 }
 
 void transmit_carrier(void)
@@ -235,34 +238,24 @@ static void test_hdlc(void)
 {
 	/* module handles for all used modules.
 	 */
-	ifax_modp	fskd,totty,dehdlc;
+	ifax_modp	fskd,debug,dehdlc,faxcntrl;
 
 	/* helper for data in-/output
 	 */
 	unsigned char data;
 
-#if 0
-	ifax_modp	toaudio,debug,replicate;
+	/* Print samples of standard output for analysis */
+	debug = ifax_create_module(IFAX_DEBUG,0,DEBUG_FORMAT_16BIT_HEX,
+				   DEBUG_METHOD_STDOUT);
 
-	/* debugger */
-	debug=ifax_create_module(IFAX_DEBUG,1);
-
-	/* Replicate the incoming signal. */
-	replicate=ifax_create_module(IFAX_REPLICATE);
-//	ifax_command(replicate,CMD_REPLICATE_ADD,toisdn);
-#endif
-
-	/* Now for the receiver. When all is decoded, the text is sent
-	 * to the outputhandle.
-	 */
-	totty=ifax_create_module(IFAX_TOAUDIO, write, 1/*outputhandle*/);
+	faxcntrl = ifax_create_module(IFAX_FAXCONTROL);
 
 	/* The deserializer synchronizes on the startbits and decodes
 	 * from the 0/1 stream from the demodulator to the bytes.
-	 * Its output is sent to the totty module. Seee above.
+	 * Its output is sent to the totty module. See above.
 	 */
 	dehdlc=ifax_create_module(IFAX_DECODE_HDLC,300);
-	dehdlc->sendto=totty;
+	dehdlc->sendto=faxcntrl;
 
 	/* The FSK demodulator. Takes the aLaw input stream and sends the
 	 * decoded version to the deserializer. See above. 
@@ -284,6 +277,7 @@ static void test_hdlc(void)
 
 void main(int argc,char **argv)
 {
+	ifax_debugsetlevel(DEBUG_INFO);
 	setup_all_modules();
 
 	/* transmit_carrier(); */

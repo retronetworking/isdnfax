@@ -9,3 +9,4 @@
 #define DEBUG_METHOD_STDERR  1
 
 #define DEBUG_FORMAT_SIGNED16BIT      0
+#define DEBUG_FORMAT_16BIT_HEX	      1

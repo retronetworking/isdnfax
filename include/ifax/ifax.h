@@ -14,6 +14,7 @@
  * Include all other files here
  */
 
+#include <ifax/types.h>
 #include <ifax/debug.h>
 #include <ifax/module.h>
 #include <ifax/bitreverse.h>

@@ -4,7 +4,8 @@
    Fax program for ISDN.
    Decoder for hdlc data input. Expects a datastream of alternating
    0/1,confidence bytes at SAMPLES_PER_SECOND.
-   Outputs decoded bytes that came in without any error.
+   Outputs decoded bytes in a short int. This allows for giving a few extra
+   codes for signaling start flags, checksum tests and error conditions.
    Automatically locks onto the start flag and undoes bit stuffing.
 
    Copyright (C) 1998 Andreas Beck	[becka@ggi-project.org]
@@ -36,10 +37,16 @@
 #include <stdarg.h>
 #include <sys/times.h>
 #include <ifax/ifax.h>
+#include <ifax/modules/decode_hdlc.h>
 
-#define HDLC_FLAG (0x7e)
-#define HDLC_STUFFMASK (0x3f)
-#define HDLC_STUFF     (0x3e)
+#define _HDLC_FLAG (0x7e)
+#define _HDLC_STUFFMASK (0x3f)
+#define _HDLC_STUFF     (0x3e)
+
+#define _CRC_INIT    0xffff
+#define _CRC_TOPMASK 0x8000
+#define _CRC_POLY    0x1021
+#define _CRC_GOOD    0x1d0f
 
 typedef struct {
 
@@ -51,6 +58,8 @@ typedef struct {
 	int	syncbitcnt;
 	int	bits;
 	int 	have_stuffed;
+
+	ifax_uint16	crc;
 
 } decode_hdlc_private;
 
@@ -74,8 +83,8 @@ int	decode_hdlc_handle(ifax_modp self, void *data, size_t length)
 {
 	char *dat=data;
 	int currbit,currconf;
-	int x,result,handled,parity;
-	char hlpres;
+	int handled,x;
+	ifax_uint16 result;
 	
 	decode_hdlc_private *priv=(decode_hdlc_private *)self->private;
 
@@ -86,12 +95,12 @@ int	decode_hdlc_handle(ifax_modp self, void *data, size_t length)
 		currconf=*dat++;
 		priv->sampcount++;
 		
-//		printf("%d,%d\n",currbit,currconf);
+		ifax_dprintf(DEBUG_JUNK,"bit in: %d,%d\n",currbit,currconf);
 
 		if (currconf<10) continue;
 		
 		if (priv->lastsamp!=currbit) {
-//			printf("synchronizing due to %d->%d at %d\n",priv->lastsamp,currbit,priv->sampcount);
+			ifax_dprintf(DEBUG_JUNK,"synchronizing due to %d->%d at %d\n",priv->lastsamp,currbit,priv->sampcount);
 			priv->lastsamp=currbit;
 			priv->sampcount=-SAMPLES_PER_SECOND/2/priv->baud;
 			priv->bitnum=0;
@@ -99,24 +108,49 @@ int	decode_hdlc_handle(ifax_modp self, void *data, size_t length)
 		if ( priv->sampcount >= priv->bitnum*
 					SAMPLES_PER_SECOND/priv->baud)
 		{
-//			printf("Bit %d(%d) is %d\n",priv->syncbitcnt,priv->bitnum,currbit);
+			ifax_dprintf(DEBUG_DEBUG,"Bit %d(%d) is %d\n",priv->syncbitcnt,priv->bitnum,currbit);
 			priv->bits<<=1;
 			priv->bits|=!!currbit;
 			priv->syncbitcnt++;
-			if ((priv->bits&0xff)==HDLC_FLAG)
+			if ((priv->bits&0xff)==_HDLC_FLAG)
 			{
-				printf("FLAG !\n");
+				result= (priv->crc == _CRC_GOOD) ? 
+					HDLC_CRC_OK : HDLC_CRC_ERR;
+				if (self->sendto)
+					ifax_handle_input(self->sendto,&result,1);
+				ifax_dprintf(DEBUG_DEBUG,"HDLC CRC %s.\n",result==HDLC_CRC_OK ? "good" : "error");
+				result=HDLC_FLAG;
+				if (self->sendto)
+					ifax_handle_input(self->sendto,&result,1);
 				priv->syncbitcnt=0;
-			} else if (!priv->have_stuffed &&(priv->bits&HDLC_STUFFMASK)==HDLC_STUFF)
+				ifax_dprintf(DEBUG_DEBUG,"HDLC FLAG\n");
+				priv->crc=_CRC_INIT;
+			} else if (!priv->have_stuffed &&(priv->bits&_HDLC_STUFFMASK)==_HDLC_STUFF)
 			{
-				printf("Stuff !\n");
+				/* We don't mention this on the stream. */
+				ifax_dprintf(DEBUG_DEBUG,"Stuff !\n");
 				priv->bits>>=1;
 				priv->syncbitcnt--;
 				priv->have_stuffed=1;
 			} else if ((priv->syncbitcnt&7)==0)
 			{
+				for(x=7;x>=0;x--)
+				{
+					if (!(priv->crc&_CRC_TOPMASK) !=
+					    !(priv->bits&(1<<x))) 
+					{ 
+						priv->crc<<=1;
+						priv->crc^=_CRC_POLY;
+					}
+					else
+						priv->crc<<=1;
+					ifax_dprintf(DEBUG_JUNK,"CRC %04x\n",priv->crc);
+				}
 				priv->have_stuffed=0;
-				printf("HDLC %x\n",priv->bits&0xff);
+				result=priv->bits&0xff;
+				if (self->sendto)
+					ifax_handle_input(self->sendto,&result,1);
+				ifax_dprintf(DEBUG_DEBUG,"HDLC %x, %x\n",priv->bits&0xff,priv->crc);
 			}
 			priv->bitnum++;
 		}
@@ -128,7 +162,6 @@ int	decode_hdlc_handle(ifax_modp self, void *data, size_t length)
 int	decode_hdlc_construct(ifax_modp self,va_list args)
 {
 	decode_hdlc_private *priv;
-	char *encode;
 	
 	if (NULL==(priv=self->private=malloc(sizeof(decode_hdlc_private)))) 
 		return 1;

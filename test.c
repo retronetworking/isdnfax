@@ -166,11 +166,38 @@ void test_modulator_V29(void)
    */
 }    
 
+void test_scrambler(void)
+{
+  /* The new scrambler/descrambler in modules/scrambler.c should be
+   * compliant with V.29.  Run a small empirical test here of
+   * encding/decoding.
+   */
+
+  int t;
+  ifax_modp scrambler, descrambler, debug;
+  unsigned char source[200];
+
+  debug = ifax_create_module(IFAX_DEBUG,1);
+  scrambler = ifax_create_module(IFAX_SCRAMBLER);
+  descrambler = ifax_create_module(IFAX_SCRAMBLER);
+
+  ifax_command(descrambler,CMD_SCRAMBLER_DESCR_V29);
+
+  scrambler->sendto = descrambler;
+  descrambler->sendto = debug;
+
+  for ( t=0; t < 200; t++ )
+    source[t] = t;
+
+  ifax_handle_input(scrambler,source,200);
+}
+
 
 void main(int argc,char **argv)
 {
 	setup_all_modules();
 
 	/* transmit_carrier(); */
-	test_modulator_V29();
+	/* test_modulator_V29(); */
+	test_scrambler();
 }
